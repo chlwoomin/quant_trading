@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-07T00:00:00",
+  "update_reason": "초기 전략",
+  "factor_weights": {
+    "quality": 0.35,
+    "value": 0.35,
+    "momentum": 0.30
+  },
+  "filters": {
+    "min_market_cap_억": 500,
+    "max_debt_ratio": 2.0,
+    "min_roe": 0.05,
+    "exclude_finance": true
+  },
+  "risk_overlay": {
+    "ma_weeks": 40,
+    "strong_bull_gap_pct": 5.0,
+    "strong_bear_gap_pct": -10.0,
+    "caution_equity_ratio": 0.50,
+    "strong_bear_equity_ratio": 0.30
+  },
+  "portfolio": {
+    "top_n": 25,
+    "stop_loss_pct": -0.08,
+    "equity_budget": 0.95
+  },
+  "validation_gates": {
+    "min_sharpe": 0.2,
+    "max_mdd_pct": -30.0,
+    "min_alpha_pct": 0.0
+  }
+}

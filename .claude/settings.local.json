@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show:*)",
+      "Bash(python -X utf8 test_pykrx.py)",
+      "Bash(pip install:*)",
+      "Bash(python -X utf8 -c \"import yfinance as yf; print\\('yfinance OK:', yf.__version__\\)\")",
+      "Bash(python -X utf8 test_yf.py)",
+      "Bash(where python:*)",
+      "Bash(conda --version)",
+      "Bash(python -X utf8 -c \"import pandas; print\\('pandas OK'\\)\")",
+      "Bash(C:/Users/woomin/AppData/Local/Programs/Python/Python39/python.exe -c \"import numpy; print\\('numpy:', numpy.__version__\\)\")",
+      "Bash(C:/Users/woomin/AppData/Local/Programs/Python/Python39/python.exe -m pip install numpy pandas pykrx yfinance --quiet)",
+      "Bash(C:/Users/woomin/AppData/Local/Programs/Python/Python39/python.exe -c \"import numpy; import pykrx; import yfinance; print\\('ALL OK - numpy:', numpy.__version__\\)\")",
+      "Bash(C:/Users/woomin/AppData/Local/Programs/Python/Python39/python.exe -X utf8 test_pykrx.py)"
+    ]
+  }
+}

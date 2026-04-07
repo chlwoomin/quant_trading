@@ -1,0 +1,57 @@
+{
+  "date": "2026-04-07",
+  "strategy_version": 1,
+  "risk_signal": {
+    "signal": "STRONG_BULL",
+    "equity_ratio": 1.0,
+    "cash_ratio": 0.0,
+    "description": "강세장 — 풀 포지션 유지",
+    "kospi": 2626.76,
+    "ma200": 2439.19,
+    "gap_pct": 7.69
+  },
+  "sim_metrics": {
+    "total_return_pct": 11.78,
+    "bm_return_pct": 9.78,
+    "alpha_pct": 2.0,
+    "ann_return_pct": 5.73,
+    "ann_bm_return_pct": 4.77,
+    "volatility_pct": 11.31,
+    "sharpe": 0.241,
+    "max_dd_pct": -9.76,
+    "win_rate_pct": 57.3,
+    "n_weeks": 104,
+    "total_buys": 31,
+    "total_sells": 18,
+    "stop_losses": 17,
+    "final_value": 11177823
+  },
+  "ai_analysis": {
+    "should_update": false,
+    "reasoning": "스킵",
+    "market_assessment": null
+  },
+  "trades": {
+    "sell": [],
+    "buy": [],
+    "hold": [
+      "018260",
+      "010130",
+      "006400",
+      "005930",
+      "033780",
+      "035720",
+      "051910",
+      "066570",
+      "009830",
+      "035420",
+      "012330",
+      "034020"
+    ],
+    "errors": []
+  },
+  "performance": {
+    "total_value": 10023843,
+    "pnl_pct": 0.24
+  }
+}
