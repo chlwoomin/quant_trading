@@ -8,13 +8,17 @@ import json
 import os
 from datetime import datetime, date
 from typing import List, Dict, Optional
-import random
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "portfolio", "virtual_portfolio.db")
 INITIAL_CASH = 10_000_000   # 가상 초기 자본: 1,000만원
 TRANSACTION_FEE = 0.00015   # 수수료 0.015%
 TRANSACTION_TAX = 0.0020    # 증권거래세 0.20% (매도 시)
+
+# ── 브로커 모드 ───────────────────────────────────────────────────────────────
+# BROKER_MODE=virtual  : pykrx 실제가 기반 가상 매매 (현재)
+# BROKER_MODE=real     : 실제 증권사 API 매매 (미래 — KIS/키움 구현 필요)
+BROKER_MODE = os.environ.get("BROKER_MODE", "virtual")
 
 
 # ── DB 초기화 ─────────────────────────────────────────────────────────────────
@@ -103,13 +107,26 @@ def get_state() -> Dict:
             "total_value": state["total_value"]}
 
 
-# ── 가상 현재가 조회 (실제 환경: pykrx로 대체) ───────────────────────────────
-def get_mock_price(ticker: str, base_price: float = None) -> float:
-    """실제 환경에서는 pykrx.stock.get_market_ohlcv() 사용"""
-    if base_price is None:
-        base_price = random.uniform(5000, 80000)
-    change = random.uniform(-0.03, 0.03)
-    return round(base_price * (1 + change))
+# ── 현재가 조회 (pykrx 실제가, 실패 시 DB 저장가 fallback) ──────────────────
+def _get_real_price(ticker: str, fallback: float = None) -> float:
+    """
+    pykrx로 실제 현재가를 조회합니다.
+    장 마감/주말/오류 시 fallback 가격(평균단가 또는 마지막 저장가)을 사용합니다.
+
+    실제 매매 전환 시:
+      BROKER_MODE=real 설정 후 이 함수를 증권사 API 호출로 교체하세요.
+      예) KIS Open API: GET /uapi/domestic-stock/v1/quotations/inquire-price
+    """
+    try:
+        from price_updater import get_current_price
+        price = get_current_price(ticker)
+        if price:
+            return price
+    except Exception:
+        pass
+    if fallback and fallback > 0:
+        return fallback
+    return 0.0  # 가격 조회 완전 실패 — 매매 건너뜀
 
 
 # ── 리밸런싱 실행 ─────────────────────────────────────────────────────────────
@@ -133,7 +150,7 @@ def rebalance(screening_result: Dict) -> Dict:
     # ── 1단계: 탈락 종목 매도 ─────────────────────────────────────────────────
     for ticker, holding in holdings.items():
         if ticker not in selected_tickers:
-            price = get_mock_price(ticker, holding["avg_price"])
+            price = _get_real_price(ticker, holding.get("current_price") or holding["avg_price"])
             amount = holding["shares"] * price
             fee = amount * TRANSACTION_FEE
             tax = amount * TRANSACTION_TAX
@@ -162,14 +179,17 @@ def rebalance(screening_result: Dict) -> Dict:
         per_stock_budget = cash * 0.95 / len(new_tickers)  # 현금 5% 버퍼
         for item in new_tickers:
             ticker = item["ticker"]
-            mock_price = random.randint(5000, 100000)
+            mock_price = _get_real_price(ticker)
+            if not mock_price or mock_price <= 0:
+                trades["errors"].append(f"{item['name']}: 가격 조회 실패")
+                continue
             shares = max(1, int(per_stock_budget / mock_price))
             amount = shares * mock_price
             fee = amount * TRANSACTION_FEE
             total_cost = amount + fee
 
             if total_cost > cash:
-                trades["errors"].append(f"{item['name']}: 잔고 부족")
+                trades["errors"].append(f"{item['name']}: 잔고 부족 (주가 {mock_price:,.0f}원)")
                 continue
 
             cash -= total_cost
@@ -207,7 +227,7 @@ def rebalance(screening_result: Dict) -> Dict:
 
     # ── 3단계: 상태 업데이트 ─────────────────────────────────────────────────
     stock_value = sum(
-        h[3] * get_mock_price(h[1], h[4])
+        h[3] * _get_real_price(h[1], h[4])
         for h in c.execute("SELECT * FROM holdings WHERE shares > 0").fetchall()
     )
     total_value = cash + stock_value

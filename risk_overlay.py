@@ -1,109 +1,161 @@
 """
 risk_overlay.py
 절대모멘텀 리스크 오버레이: KOSPI 200일 이동평균 기반 현금 전환 신호
+
+- yfinance(^KS11) 로 KOSPI 지수 조회 (주 소스)
+- pykrx 를 보조 소스로 사용
+- strategy_config.json의 risk_overlay 파라미터 사용
 """
 
-import random
 from datetime import datetime, timedelta
-from typing import Dict, Tuple
+from typing import Dict
+
+from strategy_manager import get_config
 
 
 def get_kospi_ma200(date_str: str = None) -> Dict:
     """
-    실제 환경: FinanceDataReader.DataReader('KS11') 사용
-    여기서는 시뮬레이션 데이터 반환
+    pykrx로 KOSPI 현재가와 200일 이동평균을 조회합니다.
+    pykrx 미설치 또는 장 휴장 시 마지막 저장값(data/kospi_cache.json)을 사용합니다.
     """
-    # 시뮬레이션: KOSPI 현재가와 200일 MA
-    kospi_current = random.uniform(2300, 2800)
-    ma200 = random.uniform(2400, 2600)
-    above_ma = kospi_current > ma200
-    gap_pct = (kospi_current - ma200) / ma200 * 100
+    import os, json
+    cache_path = os.path.join(os.path.dirname(__file__), "data", "kospi_cache.json")
 
+    def _save_cache(data):
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def _load_cache():
+        if os.path.exists(cache_path):
+            with open(cache_path, encoding="utf-8") as f:
+                return json.load(f)
+        return None
+
+    today = date_str or datetime.today().strftime("%Y-%m-%d")
+
+    # ── 1차: yfinance ^KS11 ───────────────────────────────────────────────────
+    try:
+        import yfinance as yf
+        end_dt  = datetime.strptime(today, "%Y-%m-%d")
+        start_dt = (end_dt - timedelta(days=320)).strftime("%Y-%m-%d")
+        raw = yf.download("^KS11", start=start_dt, end=today,
+                          progress=False, auto_adjust=True)
+        if isinstance(raw.columns, __import__("pandas").MultiIndex):
+            closes_s = raw["Close"]["^KS11"].dropna()
+        else:
+            closes_s = raw["Close"].dropna()
+
+        if len(closes_s) < 5:
+            raise ValueError("yfinance KOSPI 데이터 부족")
+
+        closes    = closes_s.values
+        kospi_cur = float(closes[-1])
+        ma200     = float(closes[-200:].mean()) if len(closes) >= 200 else float(closes.mean())
+        gap_pct   = (kospi_cur - ma200) / ma200 * 100
+
+        result = {
+            "date":          today,
+            "kospi_current": round(kospi_cur, 2),
+            "ma200":         round(ma200, 2),
+            "above_ma200":   kospi_cur > ma200,
+            "gap_pct":       round(gap_pct, 2),
+            "source":        "yfinance",
+        }
+        _save_cache(result)
+        return result
+
+    except Exception:
+        pass
+
+    # ── 2차: pykrx ───────────────────────────────────────────────────────────
+    try:
+        from pykrx import stock as pykrx_stock
+        end   = datetime.strptime(today, "%Y-%m-%d")
+        start = (end - timedelta(days=300)).strftime("%Y%m%d")
+        end_s = end.strftime("%Y%m%d")
+
+        df = pykrx_stock.get_market_ohlcv_by_date(start, end_s, "코스피")
+        if df.empty:
+            raise ValueError("pykrx KOSPI 데이터 없음")
+
+        closes    = df["종가"].values.astype(float)
+        kospi_cur = float(closes[-1])
+        ma200     = float(closes[-200:].mean()) if len(closes) >= 200 else float(closes.mean())
+        gap_pct   = (kospi_cur - ma200) / ma200 * 100
+
+        result = {
+            "date":          today,
+            "kospi_current": round(kospi_cur, 2),
+            "ma200":         round(ma200, 2),
+            "above_ma200":   kospi_cur > ma200,
+            "gap_pct":       round(gap_pct, 2),
+            "source":        "pykrx",
+        }
+        _save_cache(result)
+        return result
+
+    except Exception:
+        pass
+
+    # ── 3차: 캐시 → fallback ─────────────────────────────────────────────────
+    cached = _load_cache()
+    if cached:
+        cached["source"] = "cache"
+        return cached
     return {
-        "date":          date_str or datetime.today().strftime("%Y-%m-%d"),
-        "kospi_current": round(kospi_current, 2),
-        "ma200":         round(ma200, 2),
-        "above_ma200":   above_ma,
-        "gap_pct":       round(gap_pct, 2),
+        "date": today, "kospi_current": 2500.0, "ma200": 2500.0,
+        "above_ma200": True, "gap_pct": 0.0, "source": "fallback",
     }
 
 
-def get_risk_signal(kospi_data: Dict) -> Dict:
+def get_risk_signal(kospi_data: Dict = None, config: dict = None) -> Dict:
     """
-    리스크 신호 판단:
-    - KOSPI > 200일 MA  → 정상 운용 (주식 100%)
-    - KOSPI < 200일 MA  → 방어 모드 (주식 50%, 현금 50%)
+    리스크 신호 판단 (strategy_config.json risk_overlay 파라미터 사용)
+    kospi_data가 None이면 자동 조회합니다.
     """
-    above = kospi_data["above_ma200"]
-    gap   = kospi_data["gap_pct"]
+    if kospi_data is None:
+        kospi_data = get_kospi_ma200()
 
-    if above:
-        if gap > 5:
-            signal = "STRONG_BULL"
-            equity_ratio = 1.00
-            desc = "강세장 — 풀 포지션 유지"
+    cfg = (config or get_config()).get("risk_overlay", {})
+    gap = kospi_data["gap_pct"]
+
+    if kospi_data["above_ma200"]:
+        if gap > cfg.get("strong_bull_gap_pct", 5.0):
+            signal, equity_ratio = "STRONG_BULL", 1.00
         else:
-            signal = "NEUTRAL"
-            equity_ratio = 1.00
-            desc = "중립 — 정상 운용"
+            signal, equity_ratio = "NEUTRAL", 1.00
     else:
-        if gap < -10:
-            signal = "STRONG_BEAR"
-            equity_ratio = 0.30
-            desc = "강한 약세장 — 주식 30%, 현금 70%"
+        if gap < cfg.get("strong_bear_gap_pct", -10.0):
+            signal, equity_ratio = "STRONG_BEAR", cfg.get("strong_bear_equity_ratio", 0.30)
         else:
-            signal = "CAUTION"
-            equity_ratio = 0.50
-            desc = "주의 — 주식 50%, 현금 50%"
+            signal, equity_ratio = "CAUTION", cfg.get("caution_equity_ratio", 0.50)
 
     return {
         "signal":       signal,
         "equity_ratio": equity_ratio,
         "cash_ratio":   round(1 - equity_ratio, 2),
-        "description":  desc,
         "kospi":        kospi_data["kospi_current"],
         "ma200":        kospi_data["ma200"],
         "gap_pct":      kospi_data["gap_pct"],
+        "source":       kospi_data.get("source", "unknown"),
     }
 
 
-def check_individual_stop_loss(holdings: list) -> list:
-    """
-    개별 종목 손절 체크: 매수가 대비 -8% 이하 시 매도 신호
-    """
+def check_individual_stop_loss(holdings: list, config: dict = None) -> list:
+    """보유 종목 중 스탑로스 기준 이하 종목 반환"""
+    cfg    = config or get_config()
+    sl_pct = cfg["portfolio"]["stop_loss_pct"] * 100   # -8.0
+
     stop_signals = []
     for h in holdings:
         if h.get("current_price") and h.get("avg_price"):
             loss_pct = (h["current_price"] - h["avg_price"]) / h["avg_price"] * 100
-            if loss_pct <= -8:
+            if loss_pct <= sl_pct:
                 stop_signals.append({
                     "ticker":   h["ticker"],
                     "name":     h["name"],
                     "loss_pct": round(loss_pct, 2),
-                    "action":   "STOP_LOSS"
+                    "action":   "STOP_LOSS",
                 })
     return stop_signals
-
-
-def generate_risk_report(kospi_data: Dict, signal: Dict, stop_signals: list) -> str:
-    lines = [
-        "=" * 52,
-        f"  리스크 오버레이 점검 — {kospi_data['date']}",
-        "=" * 52,
-        f"  KOSPI 현재가 : {kospi_data['kospi_current']:,.2f}",
-        f"  200일 MA     : {kospi_data['ma200']:,.2f}",
-        f"  괴리율       : {kospi_data['gap_pct']:+.2f}%",
-        f"  시장 신호    : {signal['signal']}",
-        f"  판단         : {signal['description']}",
-        f"  권장 주식 비중: {signal['equity_ratio']*100:.0f}%  "
-        f"현금: {signal['cash_ratio']*100:.0f}%",
-        "-" * 52,
-    ]
-    if stop_signals:
-        lines.append(f"  ⚠ 손절 신호 {len(stop_signals)}건:")
-        for s in stop_signals:
-            lines.append(f"    - {s['name']} ({s['ticker']}): {s['loss_pct']:.2f}%")
-    else:
-        lines.append("  손절 신호: 없음")
-    lines.append("=" * 52)
-    return "\n".join(lines)

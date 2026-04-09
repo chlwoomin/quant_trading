@@ -1,0 +1,22 @@
+[Unit]
+Description=Quant System 24/7 Server
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/quant_system
+ExecStart=/home/ubuntu/quant_system/venv/bin/python -X utf8 server.py
+Restart=on-failure
+RestartSec=10
+
+# 환경변수 (또는 .env 파일 사용)
+EnvironmentFile=/home/ubuntu/quant_system/.env
+
+StandardOutput=append:/home/ubuntu/quant_system/logs/server.log
+StandardError=append:/home/ubuntu/quant_system/logs/server.log
+
+[Install]
+WantedBy=multi-user.target

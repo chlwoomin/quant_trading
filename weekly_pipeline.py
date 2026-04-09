@@ -33,8 +33,7 @@ from strategy_manager    import get_config, save_config, print_history
 from portfolio_manager   import init_db, rebalance, get_performance_summary
 from factor_engine       import run_screening
 from risk_overlay        import get_kospi_ma200, get_risk_signal, \
-                                check_individual_stop_loss, generate_risk_report
-from report_generator    import generate_weekly_report
+                                check_individual_stop_loss
 from backtest            import Backtest, compute_metrics
 from ai_analyst          import analyze_and_suggest
 from validation_pipeline import validate_strategy
@@ -83,7 +82,15 @@ def step_ai_analysis(config: dict, metrics: dict, perf: dict) -> dict:
     # 최근 레짐 분포 (portfolio performance_log에서 추출 불가 → 간략히 없음)
     result = analyze_and_suggest(config, metrics, perf, regime_history=None)
 
-    if result["should_update"]:
+    # AI 오류 시 디스코드 알림
+    if result.get("ai_error"):
+        log(f"  AI 분석 실패: {result['ai_error']} → 규칙 기반 fallback", "WARN")
+        try:
+            from notifier import send_system_alert
+            send_system_alert("WARN", f"AI 분석 실패\n원인: {result['ai_error']}\n→ 규칙 기반 분석으로 대체되었습니다.")
+        except Exception:
+            pass
+    elif result["should_update"]:
         log(f"  AI 변경 제안: {result['reasoning']}")
         if result["suggested_changes"]:
             log(f"  제안 변경 항목: {list(result['suggested_changes'].keys())}")
@@ -95,7 +102,8 @@ def step_ai_analysis(config: dict, metrics: dict, perf: dict) -> dict:
 
 # ── STEP 4: 전략 검증 + 업데이트 결정 ────────────────────────────────────────
 def step_validate_and_update(current_config: dict, ai_result: dict,
-                              skip_real: bool = False, force: bool = False) -> dict:
+                              skip_real: bool = False, force: bool = False,
+                              _val_result_out: dict = None) -> dict:
     log("STEP 4 — 전략 검증 및 업데이트 결정")
 
     if not ai_result.get("should_update"):
@@ -111,6 +119,12 @@ def step_validate_and_update(current_config: dict, ai_result: dict,
 
     # 검증
     val_result = validate_strategy(suggested, skip_real=skip_real)
+
+    # 검증 결과를 호출자에게 전달 (리포트용)
+    if _val_result_out is not None:
+        _val_result_out["sim_passed"]   = val_result.get("sim_result", {}).get("passed")
+        _val_result_out["real_passed"]  = val_result.get("real_result", {}).get("passed")
+        _val_result_out["real_skipped"] = val_result.get("real_result", {}).get("stage") in ("skipped", "real_skipped")
 
     if val_result["passed"]:
         reason = f"AI 제안 검증 통과 | {ai_result.get('reasoning', '')}"
@@ -128,8 +142,9 @@ def step_risk_overlay(perf: dict) -> dict:
     kospi_data  = get_kospi_ma200()
     risk_signal = get_risk_signal(kospi_data)
     stop_sigs   = check_individual_stop_loss(perf["holdings"])
-    risk_report = generate_risk_report(kospi_data, risk_signal, stop_sigs)
-    print(risk_report)
+    if stop_sigs:
+        log(f"  ⚠ 스탑로스 신호 {len(stop_sigs)}건: "
+            + ", ".join(f"{s['name']}({s['loss_pct']:.1f}%)" for s in stop_sigs))
     log(f"  시장 신호: {risk_signal['signal']}  괴리율: {risk_signal['gap_pct']:+.2f}%")
     return risk_signal
 
@@ -138,7 +153,7 @@ def step_risk_overlay(perf: dict) -> dict:
 def step_rebalance(config: dict, risk_signal: dict) -> dict:
     if risk_signal["signal"] == "STRONG_BEAR":
         log("  STRONG_BEAR 신호 — 리밸런싱 스킵, 현금 비중 유지", "WARN")
-        return {}
+        return {}, {}
 
     log("STEP 6 — 팩터 스크리닝")
     screening = run_screening(config=config)
@@ -150,42 +165,55 @@ def step_rebalance(config: dict, risk_signal: dict) -> dict:
         f"매수 {len(trade_result['trades']['buy'])}  "
         f"유지 {len(trade_result['trades']['hold'])}  "
         f"누적수익 {trade_result['pnl_pct']:+.2f}%")
-    return trade_result
+    return trade_result, screening
 
 
-# ── STEP 7: 리포트 생성 + 로그 ────────────────────────────────────────────────
+# ── STEP 7: 리포트 생성 + 발송 + 로그 ───────────────────────────────────────
 def step_report(config: dict, perf: dict, screening: dict,
                 risk_signal: dict, trade_result: dict,
-                sim_metrics: dict, ai_result: dict):
-    log("STEP 7 — 주간 리포트 생성")
+                sim_metrics: dict, ai_result: dict,
+                strategy_update_info: dict) -> dict:
+    log("STEP 7 — 주간 리포트 생성 및 발송")
 
-    # report_generator는 기존 포맷 유지
-    if screening and trade_result:
-        report = generate_weekly_report(perf, screening, risk_signal,
-                                        trade_result.get("trades", {}))
-        print(report)
+    trades = trade_result.get("trades", {}) if trade_result else {}
 
-    # JSON 로그 저장
-    run_data = {
+    # ── 리포트 데이터 구조 구성 ──────────────────────────────────────────────
+    report_data = {
         "date":             date.today().isoformat(),
         "strategy_version": config.get("version"),
-        "risk_signal":      risk_signal,
+        "current_config":   config,          # 업데이트 전 현재 전략 파라미터
+        "performance":      perf,
         "sim_metrics":      sim_metrics,
+        "risk_signal":      risk_signal,
         "ai_analysis": {
-            "should_update":    ai_result.get("should_update"),
-            "reasoning":        ai_result.get("reasoning"),
+            "should_update":     ai_result.get("should_update"),
+            "reasoning":         ai_result.get("reasoning"),
             "market_assessment": ai_result.get("market_assessment"),
         },
-        "trades":       trade_result.get("trades", {}),
-        "performance": {
-            "total_value": perf.get("total_value"),
-            "pnl_pct":     perf.get("pnl_pct"),
-        },
+        "strategy_update": strategy_update_info,
+        "trades":          trades,
     }
+
+    # ── 콘솔 출력 ────────────────────────────────────────────────────────────
+    from report_builder import build_text_report
+    print(build_text_report(report_data))
+
+    # ── 이메일 + 디스코드 발송 ────────────────────────────────────────────────
+    try:
+        from notifier import send_weekly_report
+        notify_result = send_weekly_report(report_data)
+        log(f"  알림 발송: 이메일={'✓' if notify_result['email'] else '✗'}  "
+            f"디스코드={'✓' if notify_result['discord'] else '✗'}")
+    except Exception as e:
+        log(f"  알림 발송 오류: {e}", "WARN")
+
+    # ── JSON 로그 저장 ────────────────────────────────────────────────────────
     log_path = os.path.join(LOGS_DIR, f"weekly_{date.today().isoformat()}.json")
     with open(log_path, "w", encoding="utf-8") as f:
-        json.dump(run_data, f, ensure_ascii=False, indent=2)
+        json.dump(report_data, f, ensure_ascii=False, indent=2, default=str)
     log(f"  로그 저장: {log_path}")
+
+    return report_data
 
 
 # ── 메인 파이프라인 ───────────────────────────────────────────────────────────
@@ -195,8 +223,9 @@ def run_weekly(use_ai: bool = True, use_real: bool = True, force: bool = False):
     print(f"  주간 자동화 파이프라인  —  {date.today()}")
     print(f"{bar}")
 
-    config = get_config()
-    log(f"전략 v{config['version']} 로드 완료  ({config.get('update_reason', '')})")
+    config   = get_config()
+    old_ver  = config.get("version", 1)
+    log(f"전략 v{old_ver} 로드 완료  ({config.get('update_reason', '')})")
 
     # 1. 성과 수집
     perf = step_collect_performance()
@@ -209,26 +238,45 @@ def run_weekly(use_ai: bool = True, use_real: bool = True, force: bool = False):
         ai_result = step_ai_analysis(config, sim_metrics, perf)
     else:
         log("STEP 3 — AI 분석 스킵 (--no-ai)")
-        ai_result = {"should_update": False, "reasoning": "스킵", "suggested_config": config, "suggested_changes": {}}
+        ai_result = {"should_update": False, "reasoning": "스킵",
+                     "suggested_config": config, "suggested_changes": {},
+                     "market_assessment": "분석 스킵"}
 
-    # 4. 검증 + 업데이트
-    config = step_validate_and_update(config, ai_result,
-                                       skip_real=not use_real, force=force)
+    # 4. 검증 + 업데이트 (변경 이력 추적)
+    val_result  = {}
+    new_config  = step_validate_and_update(
+        config, ai_result, skip_real=not use_real, force=force,
+        _val_result_out=val_result,
+    )
+    new_ver     = new_config.get("version", old_ver)
+    strategy_update_info = {
+        "updated":      new_ver != old_ver,
+        "old_version":  old_ver,
+        "new_version":  new_ver,
+        "changes":      ai_result.get("suggested_changes", {}),
+        "validation": {
+            "sim_passed":   val_result.get("sim_passed"),
+            "real_passed":  val_result.get("real_passed"),
+            "real_skipped": val_result.get("real_skipped", False),
+        },
+    }
+    config = new_config
 
     # 5. 리스크 오버레이
     risk_signal = step_risk_overlay(perf)
 
-    # 6. 리밸런싱
-    trade_result = step_rebalance(config, risk_signal)
+    # 6. 리밸런싱 (screening 결과를 함께 반환)
+    rebalance_result = step_rebalance(config, risk_signal)
+    if rebalance_result:
+        trade_result, screening = rebalance_result
+    else:
+        trade_result, screening = {}, {}
 
-    # 7. 리포트
+    # 7. 리포트 + 알림 발송
     perf_updated = get_performance_summary()
-    screening    = {}
-    if trade_result:
-        from factor_engine import run_screening
-        screening = run_screening(config=config)
 
-    step_report(config, perf_updated, screening, risk_signal, trade_result, sim_metrics, ai_result)
+    step_report(config, perf_updated, screening, risk_signal,
+                trade_result, sim_metrics, ai_result, strategy_update_info)
 
     print(f"\n{bar}")
     log("파이프라인 완료")

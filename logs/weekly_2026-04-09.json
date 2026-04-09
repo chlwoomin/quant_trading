@@ -1,0 +1,304 @@
+{
+  "date": "2026-04-09",
+  "strategy_version": 1,
+  "current_config": {
+    "version": 1,
+    "updated_at": "2026-04-07T00:00:00",
+    "update_reason": "초기 전략",
+    "factor_weights": {
+      "quality": 0.35,
+      "value": 0.35,
+      "momentum": 0.3
+    },
+    "filters": {
+      "min_market_cap_억": 500,
+      "max_debt_ratio": 2.0,
+      "min_roe": 0.05,
+      "exclude_finance": true
+    },
+    "risk_overlay": {
+      "ma_weeks": 40,
+      "strong_bull_gap_pct": 5.0,
+      "strong_bear_gap_pct": -10.0,
+      "caution_equity_ratio": 0.5,
+      "strong_bear_equity_ratio": 0.3
+    },
+    "portfolio": {
+      "top_n": 25,
+      "stop_loss_pct": -0.08,
+      "equity_budget": 0.95
+    },
+    "validation_gates": {
+      "min_sharpe": 0.2,
+      "max_mdd_pct": -30.0,
+      "min_alpha_pct": 0.0
+    }
+  },
+  "performance": {
+    "total_value": 9979223,
+    "initial_capital": 10000000,
+    "pnl": -20777,
+    "pnl_pct": -0.21,
+    "cash": 816273,
+    "holdings_count": 14,
+    "transaction_count": 14,
+    "performance_log": [
+      {
+        "id": 1,
+        "date": "2026-04-09",
+        "total_value": 9998622.647499999,
+        "cash": 816272.6474999988,
+        "stock_value": 9182350.0,
+        "daily_return": null,
+        "cum_return": -0.013773525000009685,
+        "kospi_return": null
+      },
+      {
+        "id": 2,
+        "date": "2026-04-09",
+        "total_value": 10004722.647499999,
+        "cash": 816272.6474999988,
+        "stock_value": 9188450.0,
+        "daily_return": null,
+        "cum_return": 0.04722647499999031,
+        "kospi_return": null
+      },
+      {
+        "id": 3,
+        "date": "2026-04-09",
+        "total_value": 10004722.647499999,
+        "cash": 816272.6474999988,
+        "stock_value": 9188450.0,
+        "daily_return": null,
+        "cum_return": 0.04722647499999031,
+        "kospi_return": null
+      },
+      {
+        "id": 4,
+        "date": "2026-04-09",
+        "total_value": 9996122.647499999,
+        "cash": 816272.6474999988,
+        "stock_value": 9179850.0,
+        "daily_return": null,
+        "cum_return": -0.03877352500000968,
+        "kospi_return": null
+      },
+      {
+        "id": 5,
+        "date": "2026-04-09",
+        "total_value": 9979222.647499999,
+        "cash": 816272.6474999988,
+        "stock_value": 9162950.0,
+        "daily_return": null,
+        "cum_return": -0.20777352500000967,
+        "kospi_return": null
+      }
+    ],
+    "holdings": [
+      {
+        "id": 1,
+        "ticker": "000660",
+        "name": "SK하이닉스",
+        "shares": 1,
+        "avg_price": 995000.0,
+        "buy_date": "2026-04-09",
+        "current_price": 997000.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 2,
+        "ticker": "005930",
+        "name": "삼성전자",
+        "shares": 3,
+        "avg_price": 203250.0,
+        "buy_date": "2026-04-09",
+        "current_price": 203500.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 3,
+        "ticker": "021240",
+        "name": "코웨이",
+        "shares": 8,
+        "avg_price": 75600.0,
+        "buy_date": "2026-04-09",
+        "current_price": 75400.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 4,
+        "ticker": "000270",
+        "name": "기아",
+        "shares": 3,
+        "avg_price": 159650.0,
+        "buy_date": "2026-04-09",
+        "current_price": 159650.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 5,
+        "ticker": "005380",
+        "name": "현대차",
+        "shares": 1,
+        "avg_price": 498500.0,
+        "buy_date": "2026-04-09",
+        "current_price": 498500.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 6,
+        "ticker": "033780",
+        "name": "KT&G",
+        "shares": 3,
+        "avg_price": 163800.0,
+        "buy_date": "2026-04-09",
+        "current_price": 163800.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 7,
+        "ticker": "012330",
+        "name": "현대모비스",
+        "shares": 1,
+        "avg_price": 406750.0,
+        "buy_date": "2026-04-09",
+        "current_price": 406500.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 8,
+        "ticker": "009150",
+        "name": "삼성전기",
+        "shares": 1,
+        "avg_price": 516000.0,
+        "buy_date": "2026-04-09",
+        "current_price": 517500.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 9,
+        "ticker": "028260",
+        "name": "삼성물산",
+        "shares": 2,
+        "avg_price": 301500.0,
+        "buy_date": "2026-04-09",
+        "current_price": 301000.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 10,
+        "ticker": "035420",
+        "name": "NAVER",
+        "shares": 3,
+        "avg_price": 199100.0,
+        "buy_date": "2026-04-09",
+        "current_price": 199000.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 11,
+        "ticker": "018260",
+        "name": "삼성에스디에스",
+        "shares": 4,
+        "avg_price": 150100.0,
+        "buy_date": "2026-04-09",
+        "current_price": 150100.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 12,
+        "ticker": "003490",
+        "name": "대한항공",
+        "shares": 25,
+        "avg_price": 24400.0,
+        "buy_date": "2026-04-09",
+        "current_price": 24400.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 13,
+        "ticker": "010130",
+        "name": "포스코홀딩스",
+        "shares": 1,
+        "avg_price": 1548000.0,
+        "buy_date": "2026-04-09",
+        "current_price": 1553000.0,
+        "updated_at": "2026-04-09"
+      },
+      {
+        "id": 14,
+        "ticker": "011200",
+        "name": "HMM",
+        "shares": 30,
+        "avg_price": 20750.0,
+        "buy_date": "2026-04-09",
+        "current_price": 20750.0,
+        "updated_at": "2026-04-09"
+      }
+    ]
+  },
+  "sim_metrics": {
+    "total_return_pct": 11.78,
+    "bm_return_pct": 9.78,
+    "alpha_pct": 2.0,
+    "ann_return_pct": 5.73,
+    "ann_bm_return_pct": 4.77,
+    "volatility_pct": 11.31,
+    "sharpe": 0.241,
+    "max_dd_pct": -9.76,
+    "win_rate_pct": 57.3,
+    "n_weeks": 104,
+    "total_buys": 31,
+    "total_sells": 18,
+    "stop_losses": 17,
+    "final_value": 11177823
+  },
+  "risk_signal": {
+    "signal": "STRONG_BULL",
+    "equity_ratio": 1.0,
+    "cash_ratio": 0.0,
+    "kospi": 5494.78,
+    "ma200": 4099.71,
+    "gap_pct": 34.03,
+    "source": "yfinance"
+  },
+  "ai_analysis": {
+    "should_update": false,
+    "reasoning": "백테스트 기간이 104주(약 2년)로 충분하며, 샤프 비율 0.241과 알파 +2.00%는 현 시장 환경에서 양호한 수준입니다. 스탑로스 발동 17건은 다소 높으나 MDD -9.76%가 설정 한도(-8% 스탑로스 감안 시) 내에서 관리되고 있어 현 파라미터가 적절히 작동하고 있다고 판단됩니다.",
+    "market_assessment": "KOSPI 기준 벤치마크 대비 주간 승률 57.3%와 초과 수익 유지로 보아 현재 시장은 퀄리티·밸류 혼합 전략에 우호적인 중립~완만한 상승 레짐으로 평가됩니다."
+  },
+  "strategy_update": {
+    "updated": false,
+    "old_version": 1,
+    "new_version": 1,
+    "changes": {},
+    "validation": {
+      "sim_passed": null,
+      "real_passed": null,
+      "real_skipped": false
+    }
+  },
+  "trades": {
+    "sell": [],
+    "buy": [],
+    "hold": [
+      "003490",
+      "000270",
+      "035420",
+      "028260",
+      "012330",
+      "018260",
+      "010130",
+      "021240",
+      "005930",
+      "005380",
+      "000660",
+      "011200",
+      "009150",
+      "033780"
+    ],
+    "errors": [
+      "삼성바이오로직스: 잔고 부족 (주가 1,591,000원)"
+    ]
+  }
+}

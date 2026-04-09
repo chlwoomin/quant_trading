@@ -1,11 +1,11 @@
 {
-  "date": "2026-04-07",
+  "date": "2026-04-08",
   "strategy_version": 1,
   "performance": {
-    "total_value": 9947655,
+    "total_value": 10001824,
     "initial_capital": 10000000,
-    "pnl": -52345,
-    "pnl_pct": -0.52,
+    "pnl": 1824,
+    "pnl_pct": 0.02,
     "cash": 753633,
     "holdings_count": 12,
     "transaction_count": 12,
@@ -58,6 +58,16 @@
         "stock_value": 9194022.0,
         "daily_return": null,
         "cum_return": -0.523447469999995,
+        "kospi_return": null
+      },
+      {
+        "id": 6,
+        "date": "2026-04-08",
+        "total_value": 10001824.253,
+        "cash": 753633.2530000001,
+        "stock_value": 9248191.0,
+        "daily_return": null,
+        "cum_return": 0.018242530000004916,
         "kospi_return": null
       }
     ],
@@ -201,13 +211,13 @@
     "final_value": 11177823
   },
   "risk_signal": {
-    "signal": "NEUTRAL",
-    "equity_ratio": 1.0,
-    "cash_ratio": 0.0,
-    "description": "중립 — 정상 운용",
-    "kospi": 2520.05,
-    "ma200": 2513.67,
-    "gap_pct": 0.25
+    "signal": "CAUTION",
+    "equity_ratio": 0.5,
+    "cash_ratio": 0.5,
+    "description": "주의 — 주식 50%, 현금 50%",
+    "kospi": 2325.14,
+    "ma200": 2402.53,
+    "gap_pct": -3.22
   },
   "ai_analysis": {
     "should_update": false,
@@ -229,18 +239,18 @@
     "sell": [],
     "buy": [],
     "hold": [
-      "035420",
-      "051910",
-      "012330",
+      "010130",
+      "066570",
       "033780",
-      "006400",
+      "009830",
       "018260",
+      "051910",
       "034020",
       "035720",
-      "005930",
-      "010130",
-      "009830",
-      "066570"
+      "012330",
+      "035420",
+      "006400",
+      "005930"
     ],
     "errors": []
   }

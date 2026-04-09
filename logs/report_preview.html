@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8">
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; max-width: 700px; margin: 0 auto; background: #f8fafc; color: #1e293b; }
+  .card { background: white; border-radius: 12px; padding: 24px; margin: 16px 0; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 1.4em; margin: 0 0 4px; }
+  h2 { font-size: 1.1em; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-top: 0; }
+  .metric { display: inline-block; background: #f1f5f9; border-radius: 8px; padding: 10px 16px; margin: 4px; text-align: center; }
+  .metric .val { font-size: 1.3em; font-weight: bold; }
+  .metric .lbl { font-size: 0.8em; color: #64748b; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+  th { background: #f1f5f9; padding: 8px; text-align: left; }
+  td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+  .regime { display: inline-block; background: #22c55e; color: white; border-radius: 20px; padding: 4px 14px; font-weight: bold; }
+  footer { text-align: center; color: #94a3b8; font-size: 0.8em; padding: 16px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📊 퀀트 시스템 주간 리포트</h1>
+  <div style="color:#64748b">2026-04-07 | 전략 v1</div>
+</div>
+
+<div class="card">
+  <h2>1. 성과보고서</h2>
+  <div>
+    <div class="metric"><div class="val">10,177,823원</div><div class="lbl">현재 평가액</div></div>
+    <div class="metric"><div class="val" style="color:#22c55e">+1.78%</div><div class="lbl">누적 수익률</div></div>
+    <div class="metric"><div class="val">12개</div><div class="lbl">보유 종목</div></div>
+    <div class="metric"><div class="val">0.241</div><div class="lbl">Sharpe</div></div>
+    <div class="metric"><div class="val">-9.8%</div><div class="lbl">MDD</div></div>
+    <div class="metric"><div class="val">+2.0%</div><div class="lbl">Alpha</div></div>
+  </div>
+
+  <h3 style="margin-top:20px">이번 주 매매</h3>
+  <p>매도 <b>0</b>종목 &nbsp;|&nbsp; 매수 <b>0</b>종목 &nbsp;|&nbsp; 유지 <b>2</b>종목</p>
+  
+  
+
+  <h3 style="margin-top:20px">보유 종목</h3>
+  <table><tr><th>종목명</th><th>티커</th><th>수량</th><th>평균단가</th></tr>
+  
+        <tr>
+          <td>삼성전자</td>
+          <td style="font-family:monospace">005930</td>
+          <td style="text-align:right">10주</td>
+          <td style="text-align:right">72,000원</td>
+        </tr>
+        <tr>
+          <td>SK하이닉스</td>
+          <td style="font-family:monospace">000660</td>
+          <td style="text-align:right">5주</td>
+          <td style="text-align:right">180,000원</td>
+        </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>2. AI 시장 분석</h2>
+  <p>시장 레짐: <span class="regime">STRONG_BULL</span>
+     &nbsp; KOSPI 200MA 대비 <b>+7.69%</b></p>
+  <p>💡 KOSPI가 200일선을 7.7% 상회하며 강세장 지속 중입니다.</p>
+  <p>현재 전략이 Alpha +2%로 벤치마크를 유지하고 있어 변경 불필요합니다.</p>
+</div>
+
+<div class="card">
+  <h2>3. 전략 업데이트 제안서</h2>
+  
+        <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:12px;margin:8px 0;border-radius:4px">
+          ✅ 전략 변경 없음 (v1 유지)
+        </div>
+  <table>
+    <tr><th>지표</th><th>현재</th><th>목표</th></tr>
+    <tr><td>누적 수익률</td><td>+11.78%</td><td>벤치마크 초과</td></tr>
+    <tr><td>샤프 비율</td><td>0.241</td><td>≥ 0.2</td></tr>
+    <tr><td>MDD</td><td>-9.8%</td><td>≥ -30%</td></tr>
+    <tr><td>Alpha</td><td>+2.0%</td><td>≥ 0%</td></tr>
+  </table>
+</div>
+
+<footer>퀀트 시스템 자동 발송 | 2026-04-07</footer>
+</body></html>

@@ -23,6 +23,19 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 
+def _load_env():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+
+_load_env()
+
+
 # ── 분석 프롬프트 ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """당신은 한국 주식 멀티팩터 투자 전략을 관리하는 퀀트 애널리스트입니다.
 
@@ -136,7 +149,10 @@ def analyze_and_suggest(
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
     if not ANTHROPIC_AVAILABLE or not api_key:
-        return _fallback_analysis(config, backtest_metrics)
+        result = _fallback_analysis(config, backtest_metrics)
+        reason = "anthropic 패키지 미설치" if not ANTHROPIC_AVAILABLE else "ANTHROPIC_API_KEY 미설정"
+        result["ai_error"] = reason
+        return result
 
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -162,11 +178,15 @@ def analyze_and_suggest(
             "suggested_config": suggested_config,
             "suggested_changes": parsed.get("suggested_changes", {}),
             "raw_response":     raw,
+            "ai_error":         None,   # 정상
         }
 
     except Exception as e:
-        print(f"  AI 분석 오류: {e}")
-        return _fallback_analysis(config, backtest_metrics)
+        error_msg = str(e)
+        print(f"  AI 분석 오류: {error_msg}")
+        result = _fallback_analysis(config, backtest_metrics)
+        result["ai_error"] = error_msg   # 호출자에서 알림 발송 판단
+        return result
 
 
 def _parse_response(raw: str) -> dict:
