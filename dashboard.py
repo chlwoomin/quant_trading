@@ -174,6 +174,68 @@ def build_html():
 
     price_note = "실시간 (pykrx)" if PYKRX_OK else "저장가 (pykrx 미연결)"
 
+    # Python 3.9: f-string 중첩 불가 → 조건부 섹션 미리 변수화
+    perf_chart_html = "<canvas id='perfChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"
+
+    if holdings:
+        holdings_html = (
+            '<div class="tbl-wrap"><table>'
+            '<thead><tr>'
+            '<th>종목명</th><th>티커</th><th class="right">수량</th>'
+            '<th class="right">평균단가</th><th class="right">현재가</th>'
+            '<th class="right">수익률</th><th class="right">손익금</th>'
+            '<th class="right">평가금액</th><th class="center">가격</th>'
+            '</tr></thead>'
+            '<tbody>' + holding_rows + '</tbody>'
+            '</table></div>'
+        )
+    else:
+        holdings_html = "<div class='no-data'>보유 종목 없음</div>"
+
+    if trades:
+        trades_html = (
+            '<div class="tbl-wrap"><table>'
+            '<thead><tr>'
+            '<th>날짜</th><th class="center">구분</th><th>종목</th>'
+            '<th class="right">수량</th><th class="right">가격</th><th class="right">금액</th>'
+            '</tr></thead>'
+            '<tbody>' + trade_rows + '</tbody>'
+            '</table></div>'
+        )
+    else:
+        trades_html = "<div class='no-data'>거래 내역 없음</div>"
+
+    if perf_log:
+        chart_script = (
+            "const ctx = document.getElementById('perfChart').getContext('2d');\n"
+            "new Chart(ctx, {\n"
+            "  type: 'bar',\n"
+            "  data: {\n"
+            "    labels: " + chart_labels + ",\n"
+            "    datasets: [{\n"
+            "      label: '일별 수익률 (%)',\n"
+            "      data: " + chart_values + ",\n"
+            "      backgroundColor: " + chart_values + ".map(v => v >= 0 ? 'rgba(74,222,128,0.7)' : 'rgba(248,113,113,0.7)'),\n"
+            "      borderRadius: 3,\n"
+            "    }]\n"
+            "  },\n"
+            "  options: {\n"
+            "    responsive: true,\n"
+            "    plugins: { legend: { display:false }, tooltip: { callbacks: {\n"
+            "      label: ctx => ctx.parsed.y.toFixed(3) + '%'\n"
+            "    } } },\n"
+            "    scales: {\n"
+            "      x: { ticks: { color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#1e293b' } },\n"
+            "      y: { ticks: { color:'#94a3b8', callback: v => v+'%' }, grid:{ color:'#334155' } }\n"
+            "    }\n"
+            "  }\n"
+            "});"
+        )
+    else:
+        chart_script = ""
+
+    exclude_finance_str = "예" if fi.get("exclude_finance") else "아니오"
+
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -299,7 +361,7 @@ def build_html():
 
   <div class="card">
     <div class="card-title">일별 수익률 (최근 30일)</div>
-    {"<canvas id='perfChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"}
+    {perf_chart_html}
   </div>
 
   <div class="card">
@@ -315,7 +377,7 @@ def build_html():
       <div class="param-item"><div class="pk">최소 시총</div><div class="pv">{fi.get('min_market_cap_억',0):,}억</div></div>
       <div class="param-item"><div class="pk">최소 ROE</div><div class="pv">{fi.get('min_roe',0):.0%}</div></div>
       <div class="param-item"><div class="pk">최대 부채</div><div class="pv">{fi.get('max_debt_ratio',0):.1f}x</div></div>
-      <div class="param-item"><div class="pk">금융주 제외</div><div class="pv">{'예' if fi.get('exclude_finance') else '아니오'}</div></div>
+      <div class="param-item"><div class="pk">금융주 제외</div><div class="pv">{exclude_finance_str}</div></div>
       <div class="param-item"><div class="pk">Min Sharpe</div><div class="pv">{vg.get('min_sharpe',0)}</div></div>
     </div>
     <div style="margin-top:14px;">
@@ -340,20 +402,7 @@ def build_html():
 <div class="grid">
   <div class="card">
     <div class="card-title">보유 종목 ({summary['n_holdings']}개)</div>
-    {"<div class='no-data'>보유 종목 없음</div>" if not holdings else f"""
-    <div class="tbl-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>종목명</th><th>티커</th><th class="right">수량</th>
-          <th class="right">평균단가</th><th class="right">현재가</th>
-          <th class="right">수익률</th><th class="right">손익금</th>
-          <th class="right">평가금액</th><th class="center">가격</th>
-        </tr>
-      </thead>
-      <tbody>{holding_rows}</tbody>
-    </table>
-    </div>"""}
+    {holdings_html}
   </div>
 </div>
 
@@ -361,49 +410,14 @@ def build_html():
 <div class="grid">
   <div class="card">
     <div class="card-title">최근 거래 내역</div>
-    {"<div class='no-data'>거래 내역 없음</div>" if not trades else f"""
-    <div class="tbl-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>날짜</th><th class="center">구분</th><th>종목</th>
-          <th class="right">수량</th><th class="right">가격</th><th class="right">금액</th>
-        </tr>
-      </thead>
-      <tbody>{trade_rows}</tbody>
-    </table>
-    </div>"""}
+    {trades_html}
   </div>
 </div>
 
 <div class="refresh-bar">30초마다 자동 새로고침 &nbsp;·&nbsp; SSH 터널 전용 (127.0.0.1)</div>
 
 <script>
-{"" if not perf_log else f"""
-const ctx = document.getElementById('perfChart').getContext('2d');
-new Chart(ctx, {{
-  type: 'bar',
-  data: {{
-    labels: {chart_labels},
-    datasets: [{{
-      label: '일별 수익률 (%)',
-      data: {chart_values},
-      backgroundColor: {chart_values}.map(v => v >= 0 ? 'rgba(74,222,128,0.7)' : 'rgba(248,113,113,0.7)'),
-      borderRadius: 3,
-    }}]
-  }},
-  options: {{
-    responsive: true,
-    plugins: {{ legend: {{ display:false }}, tooltip: {{ callbacks: {{
-      label: ctx => ctx.parsed.y.toFixed(3) + '%'
-    }} }} }},
-    scales: {{
-      x: {{ ticks: {{ color:'#94a3b8', font:{{ size:10 }} }}, grid:{{ color:'#1e293b' }} }},
-      y: {{ ticks: {{ color:'#94a3b8', callback: v => v+'%' }}, grid:{{ color:'#334155' }} }}
-    }}
-  }}
-}});
-"""}
+{chart_script}
 </script>
 
 </body>
