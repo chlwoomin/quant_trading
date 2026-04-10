@@ -50,6 +50,11 @@ PYTHON=C:/Users/woomin/AppData/Local/Programs/Python/Python39/python.exe
 $PYTHON -X utf8 server.py          # 서버 시작 (APScheduler)
 $PYTHON -X utf8 server.py --test   # 스케줄 확인 후 종료
 
+# 웹 대시보드 (SSH 터널 전용, 127.0.0.1:8080)
+$PYTHON -X utf8 dashboard.py               # 기본 포트 8080
+$PYTHON -X utf8 dashboard.py --port 9090   # 포트 변경
+# SSH 터널: ssh -L 8080:localhost:8080 user@서버IP → 브라우저 http://localhost:8080
+
 # 주간 파이프라인 수동 실행
 $PYTHON -X utf8 weekly_pipeline.py             # 전체 (AI + 실제검증 포함)
 $PYTHON -X utf8 weekly_pipeline.py --no-ai     # AI 분석 스킵
