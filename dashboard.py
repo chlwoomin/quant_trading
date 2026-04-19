@@ -98,8 +98,19 @@ def get_performance_log(n=30):
     return list(reversed(rows))
 
 
-def get_kospi_cumulative(dates):
-    """dates 리스트에 맞춰 KOSPI 누적 수익률(%) 반환. 실패 시 빈 리스트."""
+def get_portfolio_history(n=365 * 3):
+    """portfolio_state에서 날짜·평가액 이력 반환 (오래된 순)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = [dict(r) for r in conn.execute(
+        "SELECT date, total_value FROM portfolio_state ORDER BY id DESC LIMIT ?", (n,)
+    ).fetchall()]
+    conn.close()
+    return list(reversed(rows))
+
+
+def get_kospi_prices(dates):
+    """dates 리스트에 맞춰 KOSPI ^KS11 원시 종가 반환. 실패 시 빈 리스트."""
     if not dates:
         return []
     try:
@@ -113,21 +124,14 @@ def get_kospi_cumulative(dates):
                          progress=False)
         if df.empty:
             return []
-        # yfinance 버전에 따라 컬럼이 MultiIndex일 수 있음
         close = df["Close"]
         if hasattr(close, "squeeze"):
             close = close.squeeze()
         close = close.dropna()
-        # 기준가: dates[0] 이전 마지막 종가
-        base_cands = close[close.index <= dates[0]]
-        base = float((base_cands if not base_cands.empty else close).iloc[-1])
         result = []
         for d in dates:
             cands = close[close.index <= d]
-            if cands.empty:
-                result.append(None)
-            else:
-                result.append(round((float(cands.iloc[-1]) / base - 1) * 100, 2))
+            result.append(round(float(cands.iloc[-1]), 2) if not cands.empty else None)
         return result
     except Exception:
         return []
@@ -159,8 +163,8 @@ def build_html():
     config   = get_config()
     regime   = get_regime()
     trades   = get_recent_trades(15)
-    perf_log_bar = get_performance_log(30)       # 일별 수익률 바 차트용
-    perf_log_all = get_performance_log(365 * 3)  # 비교 차트 전체 이력용
+    perf_log_bar = get_performance_log(30)   # 일별 수익률 바 차트용
+    port_hist    = get_portfolio_history()   # 비교 차트: 실제 평가액 이력
 
     fw = config.get("factor_weights", {})
     ro = config.get("risk_overlay",   {})
@@ -208,27 +212,23 @@ def build_html():
     chart_labels = json.dumps([r.get("date","") for r in perf_log_bar])
     chart_values = json.dumps([round(r.get("daily_return_pct", 0), 3) for r in perf_log_bar])
 
-    # 누적 수익률 vs KOSPI 전체 데이터 (JS period 필터용)
-    all_dates = [r.get("date","") for r in perf_log_all]
-    all_cum_pf = []
-    acc = 1.0
-    for r in perf_log_all:
-        acc *= (1 + r.get("daily_return_pct", 0) / 100)
-        all_cum_pf.append(round((acc - 1) * 100, 2))
-    kospi_cum = get_kospi_cumulative(all_dates)
-    all_kospi_cum = kospi_cum if kospi_cum else [None] * len(all_cum_pf)
-    has_kospi = bool(kospi_cum)
+    # 비교 차트: portfolio_state 실제 평가액 + KOSPI 원시 종가
+    # JS에서 선택 기간 시작점 기준으로 독립 수익률 계산
+    all_dates      = [r["date"]        for r in port_hist]
+    all_port_vals  = [r["total_value"] for r in port_hist]
+    kospi_prices   = get_kospi_prices(all_dates)
+    has_kospi      = bool(kospi_prices)
 
-    all_labels_json  = json.dumps(all_dates)
-    all_cum_pf_json  = json.dumps(all_cum_pf)
-    all_kospi_json   = json.dumps(all_kospi_cum)
+    all_labels_json     = json.dumps(all_dates)
+    all_port_vals_json  = json.dumps(all_port_vals)
+    all_kospi_json      = json.dumps(kospi_prices if kospi_prices else [None] * len(all_dates))
 
     price_note = "실시간 (pykrx)" if PYKRX_OK else "저장가 (pykrx 미연결)"
 
     # Python 3.9: f-string 중첩 불가 → 조건부 섹션 미리 변수화
     perf_chart_html = "<canvas id='perfChart'></canvas>" if perf_log_bar else "<div class='no-data'>성과 데이터 없음</div>"
     kospi_note = "" if has_kospi else " <span style='color:#94a3b8;font-size:11px'>(KOSPI 데이터 로드 실패)</span>"
-    cmp_chart_html = "<canvas id='cmpChart'></canvas>" if perf_log_all else "<div class='no-data'>성과 데이터 없음</div>"
+    cmp_chart_html = "<canvas id='cmpChart'></canvas>" if port_hist else "<div class='no-data'>성과 데이터 없음</div>"
 
     if holdings:
         holdings_html = (
@@ -258,12 +258,12 @@ def build_html():
     else:
         trades_html = "<div class='no-data'>거래 내역 없음</div>"
 
-    if perf_log_bar or perf_log_all:
+    if perf_log_bar or port_hist:
         chart_script = (
-            # 전체 데이터 임베드
-            "const allLabels = " + all_labels_json + ";\n"
-            "const allPf     = " + all_cum_pf_json + ";\n"
-            "const allKospi  = " + all_kospi_json  + ";\n\n"
+            # 전체 데이터 임베드 (raw 값 — JS에서 기간별 수익률 독립 계산)
+            "const allLabels   = " + all_labels_json    + ";\n"
+            "const allPortVals = " + all_port_vals_json + ";\n"
+            "const allKospi    = " + all_kospi_json     + ";\n\n"
 
             # 일별 수익률 바 차트
             "const ctx = document.getElementById('perfChart').getContext('2d');\n"
@@ -319,7 +319,16 @@ def build_html():
             "  }\n"
             "});\n\n"
 
-            # period 적용 함수
+            # 기간별 독립 수익률 계산 함수
+            "function toRet(arr, base) {\n"
+            "  return arr.map(v => (v != null && base) ? +((v / base - 1) * 100).toFixed(2) : null);\n"
+            "}\n"
+            "function setStat(id, val) {\n"
+            "  const el = document.getElementById(id);\n"
+            "  if (val == null) { el.textContent = '-'; el.className = 'stat-val'; return; }\n"
+            "  el.textContent = (val >= 0 ? '+' : '') + val.toFixed(2) + (id === 'alphaVal' ? '%p' : '%');\n"
+            "  el.className = val >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
+            "}\n"
             "function applyPeriod(days, btnId) {\n"
             "  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));\n"
             "  document.getElementById(btnId).classList.add('active');\n"
@@ -327,37 +336,27 @@ def build_html():
             "  if (days > 0) {\n"
             "    const cutoff = new Date();\n"
             "    cutoff.setDate(cutoff.getDate() - days);\n"
-            "    const cutStr = cutoff.toISOString().slice(0,10);\n"
+            "    const cutStr = cutoff.toISOString().slice(0, 10);\n"
             "    const idx = allLabels.findIndex(d => d >= cutStr);\n"
             "    startIdx = idx >= 0 ? idx : 0;\n"
             "  }\n"
-            "  const labels = allLabels.slice(startIdx);\n"
-            "  const pfBase = allPf[startIdx] != null ? allPf[startIdx] : 0;\n"
-            "  const kiBase = allKospi[startIdx] != null ? allKospi[startIdx] : 0;\n"
-            "  const pfData = allPf.slice(startIdx).map(v => v != null ? +((v - pfBase).toFixed(2)) : null);\n"
-            "  const kiData = allKospi.slice(startIdx).map(v => v != null ? +((v - kiBase).toFixed(2)) : null);\n"
+            "  const labels  = allLabels.slice(startIdx);\n"
+            "  const pfSlice = allPortVals.slice(startIdx);\n"
+            "  const kiSlice = allKospi.slice(startIdx);\n"
+            "  // 각각 기간 시작 기준가로 독립 수익률 계산\n"
+            "  const pfBase  = pfSlice.find(v => v != null);\n"
+            "  const kiBase  = kiSlice.find(v => v != null);\n"
+            "  const pfData  = toRet(pfSlice, pfBase);\n"
+            "  const kiData  = toRet(kiSlice, kiBase);\n"
             "  cmpChart.data.labels = labels;\n"
             "  cmpChart.data.datasets[0].data = pfData;\n"
             "  cmpChart.data.datasets[1].data = kiData;\n"
             "  cmpChart.update();\n"
             "  const lastPf = pfData.filter(v => v != null).at(-1);\n"
             "  const lastKi = kiData.filter(v => v != null).at(-1);\n"
-            "  if (lastPf != null) {\n"
-            "    const el = document.getElementById('pfRet');\n"
-            "    el.textContent = (lastPf>=0?'+':'') + lastPf.toFixed(2) + '%';\n"
-            "    el.className = lastPf >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
-            "  }\n"
-            "  if (lastKi != null) {\n"
-            "    const el = document.getElementById('kiRet');\n"
-            "    el.textContent = (lastKi>=0?'+':'') + lastKi.toFixed(2) + '%';\n"
-            "    el.className = lastKi >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
-            "  }\n"
-            "  if (lastPf != null && lastKi != null) {\n"
-            "    const alpha = +((lastPf - lastKi).toFixed(2));\n"
-            "    const el = document.getElementById('alphaVal');\n"
-            "    el.textContent = (alpha>=0?'+':'') + alpha + '%p';\n"
-            "    el.className = alpha >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
-            "  }\n"
+            "  setStat('pfRet', lastPf);\n"
+            "  setStat('kiRet', lastKi);\n"
+            "  setStat('alphaVal', (lastPf != null && lastKi != null) ? +((lastPf - lastKi).toFixed(2)) : null);\n"
             "}\n"
             "applyPeriod(0, 'btn-all');\n"
         )
