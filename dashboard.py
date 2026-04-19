@@ -159,7 +159,8 @@ def build_html():
     config   = get_config()
     regime   = get_regime()
     trades   = get_recent_trades(15)
-    perf_log = get_performance_log(30)
+    perf_log_bar = get_performance_log(30)       # 일별 수익률 바 차트용
+    perf_log_all = get_performance_log(365 * 3)  # 비교 차트 전체 이력용
 
     fw = config.get("factor_weights", {})
     ro = config.get("risk_overlay",   {})
@@ -203,29 +204,31 @@ def build_html():
           <td class="right mono">{t['amount']:,.0f}</td>
         </tr>"""
 
-    # 일별 수익률 차트 데이터
-    chart_labels = json.dumps([r.get("date","") for r in perf_log])
-    chart_values = json.dumps([round(r.get("daily_return_pct", 0), 3) for r in perf_log])
+    # 일별 수익률 바 차트 데이터 (최근 30일)
+    chart_labels = json.dumps([r.get("date","") for r in perf_log_bar])
+    chart_values = json.dumps([round(r.get("daily_return_pct", 0), 3) for r in perf_log_bar])
 
-    # 누적 수익률 vs KOSPI 데이터
-    dates_list = [r.get("date","") for r in perf_log]
-    cum_pf = []
+    # 누적 수익률 vs KOSPI 전체 데이터 (JS period 필터용)
+    all_dates = [r.get("date","") for r in perf_log_all]
+    all_cum_pf = []
     acc = 1.0
-    for r in perf_log:
+    for r in perf_log_all:
         acc *= (1 + r.get("daily_return_pct", 0) / 100)
-        cum_pf.append(round((acc - 1) * 100, 2))
-    kospi_cum = get_kospi_cumulative(dates_list)
-    # None → JSON null 처리는 json.dumps가 자동 처리
-    cum_pf_json    = json.dumps(cum_pf)
-    kospi_cum_json = json.dumps(kospi_cum if kospi_cum else [None] * len(cum_pf))
+        all_cum_pf.append(round((acc - 1) * 100, 2))
+    kospi_cum = get_kospi_cumulative(all_dates)
+    all_kospi_cum = kospi_cum if kospi_cum else [None] * len(all_cum_pf)
     has_kospi = bool(kospi_cum)
+
+    all_labels_json  = json.dumps(all_dates)
+    all_cum_pf_json  = json.dumps(all_cum_pf)
+    all_kospi_json   = json.dumps(all_kospi_cum)
 
     price_note = "실시간 (pykrx)" if PYKRX_OK else "저장가 (pykrx 미연결)"
 
     # Python 3.9: f-string 중첩 불가 → 조건부 섹션 미리 변수화
-    perf_chart_html = "<canvas id='perfChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"
+    perf_chart_html = "<canvas id='perfChart'></canvas>" if perf_log_bar else "<div class='no-data'>성과 데이터 없음</div>"
     kospi_note = "" if has_kospi else " <span style='color:#94a3b8;font-size:11px'>(KOSPI 데이터 로드 실패)</span>"
-    cmp_chart_html = "<canvas id='cmpChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"
+    cmp_chart_html = "<canvas id='cmpChart'></canvas>" if perf_log_all else "<div class='no-data'>성과 데이터 없음</div>"
 
     if holdings:
         holdings_html = (
@@ -255,8 +258,13 @@ def build_html():
     else:
         trades_html = "<div class='no-data'>거래 내역 없음</div>"
 
-    if perf_log:
+    if perf_log_bar or perf_log_all:
         chart_script = (
+            # 전체 데이터 임베드
+            "const allLabels = " + all_labels_json + ";\n"
+            "const allPf     = " + all_cum_pf_json + ";\n"
+            "const allKospi  = " + all_kospi_json  + ";\n\n"
+
             # 일별 수익률 바 차트
             "const ctx = document.getElementById('perfChart').getContext('2d');\n"
             "new Chart(ctx, {\n"
@@ -273,53 +281,85 @@ def build_html():
             "  options: {\n"
             "    responsive: true,\n"
             "    plugins: { legend: { display:false }, tooltip: { callbacks: {\n"
-            "      label: ctx => ctx.parsed.y.toFixed(3) + '%'\n"
+            "      label: c => c.parsed.y.toFixed(3) + '%'\n"
             "    } } },\n"
             "    scales: {\n"
             "      x: { ticks: { color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#1e293b' } },\n"
             "      y: { ticks: { color:'#94a3b8', callback: v => v+'%' }, grid:{ color:'#334155' } }\n"
             "    }\n"
             "  }\n"
-            "});\n"
-            # 누적 수익률 vs KOSPI 라인 차트
+            "});\n\n"
+
+            # 누적 vs KOSPI 라인 차트 (period 필터 지원)
             "const ctx2 = document.getElementById('cmpChart').getContext('2d');\n"
-            "new Chart(ctx2, {\n"
+            "const cmpChart = new Chart(ctx2, {\n"
             "  type: 'line',\n"
-            "  data: {\n"
-            "    labels: " + chart_labels + ",\n"
-            "    datasets: [\n"
-            "      {\n"
-            "        label: '포트폴리오',\n"
-            "        data: " + cum_pf_json + ",\n"
-            "        borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)',\n"
-            "        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,\n"
-            "      },\n"
-            "      {\n"
-            "        label: 'KOSPI',\n"
-            "        data: " + kospi_cum_json + ",\n"
-            "        borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)',\n"
-            "        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,\n"
-            "        borderDash: [4,3],\n"
-            "      }\n"
-            "    ]\n"
-            "  },\n"
+            "  data: { labels: [], datasets: [\n"
+            "    { label: '포트폴리오', data: [], borderColor:'#38bdf8',\n"
+            "      backgroundColor:'rgba(56,189,248,0.08)', borderWidth:2,\n"
+            "      pointRadius:2, fill:true, tension:0.3 },\n"
+            "    { label: 'KOSPI', data: [], borderColor:'#f59e0b',\n"
+            "      backgroundColor:'rgba(245,158,11,0.06)', borderWidth:2,\n"
+            "      pointRadius:2, fill:true, tension:0.3, borderDash:[4,3] }\n"
+            "  ]},\n"
             "  options: {\n"
             "    responsive: true,\n"
-            "    interaction: { mode: 'index', intersect: false },\n"
+            "    interaction: { mode:'index', intersect:false },\n"
             "    plugins: {\n"
             "      legend: { labels: { color:'#e2e8f0', font:{ size:12 } } },\n"
-            "      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y != null ? ctx.parsed.y.toFixed(2)+'%' : 'N/A') } }\n"
+            "      tooltip: { callbacks: { label: c =>\n"
+            "        c.dataset.label + ': ' + (c.parsed.y != null ? (c.parsed.y>=0?'+':'') + c.parsed.y.toFixed(2)+'%' : 'N/A')\n"
+            "      }}\n"
             "    },\n"
             "    scales: {\n"
-            "      x: { ticks: { color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#1e293b' } },\n"
-            "      y: {\n"
-            "        ticks: { color:'#94a3b8', callback: v => v+'%' },\n"
-            "        grid: { color:'#334155' },\n"
-            "        afterDataLimits: axis => { const pad=1; axis.min-=pad; axis.max+=pad; }\n"
-            "      }\n"
+            "      x: { ticks:{ color:'#94a3b8', font:{size:10} }, grid:{color:'#1e293b'} },\n"
+            "      y: { ticks:{ color:'#94a3b8', callback: v => v+'%' }, grid:{color:'#334155'},\n"
+            "           afterDataLimits: ax => { ax.min -= 0.5; ax.max += 0.5; } }\n"
             "    }\n"
             "  }\n"
-            "});"
+            "});\n\n"
+
+            # period 적용 함수
+            "function applyPeriod(days, btnId) {\n"
+            "  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));\n"
+            "  document.getElementById(btnId).classList.add('active');\n"
+            "  let startIdx = 0;\n"
+            "  if (days > 0) {\n"
+            "    const cutoff = new Date();\n"
+            "    cutoff.setDate(cutoff.getDate() - days);\n"
+            "    const cutStr = cutoff.toISOString().slice(0,10);\n"
+            "    const idx = allLabels.findIndex(d => d >= cutStr);\n"
+            "    startIdx = idx >= 0 ? idx : 0;\n"
+            "  }\n"
+            "  const labels = allLabels.slice(startIdx);\n"
+            "  const pfBase = allPf[startIdx] != null ? allPf[startIdx] : 0;\n"
+            "  const kiBase = allKospi[startIdx] != null ? allKospi[startIdx] : 0;\n"
+            "  const pfData = allPf.slice(startIdx).map(v => v != null ? +((v - pfBase).toFixed(2)) : null);\n"
+            "  const kiData = allKospi.slice(startIdx).map(v => v != null ? +((v - kiBase).toFixed(2)) : null);\n"
+            "  cmpChart.data.labels = labels;\n"
+            "  cmpChart.data.datasets[0].data = pfData;\n"
+            "  cmpChart.data.datasets[1].data = kiData;\n"
+            "  cmpChart.update();\n"
+            "  const lastPf = pfData.filter(v => v != null).at(-1);\n"
+            "  const lastKi = kiData.filter(v => v != null).at(-1);\n"
+            "  if (lastPf != null) {\n"
+            "    const el = document.getElementById('pfRet');\n"
+            "    el.textContent = (lastPf>=0?'+':'') + lastPf.toFixed(2) + '%';\n"
+            "    el.className = lastPf >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
+            "  }\n"
+            "  if (lastKi != null) {\n"
+            "    const el = document.getElementById('kiRet');\n"
+            "    el.textContent = (lastKi>=0?'+':'') + lastKi.toFixed(2) + '%';\n"
+            "    el.className = lastKi >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
+            "  }\n"
+            "  if (lastPf != null && lastKi != null) {\n"
+            "    const alpha = +((lastPf - lastKi).toFixed(2));\n"
+            "    const el = document.getElementById('alphaVal');\n"
+            "    el.textContent = (alpha>=0?'+':'') + alpha + '%p';\n"
+            "    el.className = alpha >= 0 ? 'stat-val pos' : 'stat-val neg';\n"
+            "  }\n"
+            "}\n"
+            "applyPeriod(0, 'btn-all');\n"
         )
     else:
         chart_script = ""
@@ -402,8 +442,32 @@ def build_html():
              font-size:11px; font-weight:600; color:#fff; }}
 
   canvas {{ max-height:220px; }}
-  #cmpChart {{ max-height:260px; }}
+  #cmpChart {{ max-height:280px; }}
   .no-data {{ color:var(--muted); text-align:center; padding:24px; }}
+
+  /* 비교 차트 헤더 */
+  .cmp-header {{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; }}
+  .cmp-header .card-title {{ margin-bottom:0; }}
+
+  /* 기간 버튼 */
+  .period-btns {{ display:flex; gap:4px; }}
+  .period-btn {{
+    background:#0f172a; border:1px solid var(--border); color:var(--muted);
+    font-size:11px; font-weight:600; padding:3px 10px; border-radius:6px;
+    cursor:pointer; transition:all .15s;
+  }}
+  .period-btn:hover {{ border-color:var(--accent); color:var(--accent); }}
+  .period-btn.active {{ background:var(--accent); border-color:var(--accent); color:#0f172a; }}
+
+  /* 수익률 통계 배지 */
+  .cmp-stats {{ display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; }}
+  .stat-item {{ display:flex; flex-direction:column; align-items:center; background:#0f172a;
+               border-radius:8px; padding:6px 14px; min-width:90px; }}
+  .stat-label {{ font-size:10px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }}
+  .stat-val {{ font-size:15px; font-weight:700; margin-top:2px; }}
+  .stat-val.pos {{ color:var(--pos); }}
+  .stat-val.neg {{ color:var(--neg); }}
+  .stat-divider {{ width:1px; background:var(--border); align-self:stretch; }}
 
   /* 새로고침 */
   .refresh-bar {{ text-align:center; padding:8px; color:var(--muted); font-size:11px; }}
@@ -450,7 +514,32 @@ def build_html():
 <!-- 포트폴리오 vs KOSPI 누적 수익률 -->
 <div class="grid">
   <div class="card">
-    <div class="card-title">포트폴리오 vs KOSPI 누적 수익률{kospi_note}</div>
+    <div class="cmp-header">
+      <span class="card-title">포트폴리오 vs KOSPI 누적 수익률{kospi_note}</span>
+      <div class="period-btns">
+        <button class="period-btn" id="btn-1w"  onclick="applyPeriod(7,'btn-1w')">1W</button>
+        <button class="period-btn" id="btn-1m"  onclick="applyPeriod(30,'btn-1m')">1M</button>
+        <button class="period-btn" id="btn-3m"  onclick="applyPeriod(90,'btn-3m')">3M</button>
+        <button class="period-btn" id="btn-6m"  onclick="applyPeriod(180,'btn-6m')">6M</button>
+        <button class="period-btn" id="btn-all" onclick="applyPeriod(0,'btn-all')">ALL</button>
+      </div>
+    </div>
+    <div class="cmp-stats">
+      <div class="stat-item">
+        <span class="stat-label">포트폴리오</span>
+        <span class="stat-val" id="pfRet">-</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">KOSPI</span>
+        <span class="stat-val" id="kiRet">-</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">초과수익</span>
+        <span class="stat-val" id="alphaVal">-</span>
+      </div>
+    </div>
     {cmp_chart_html}
   </div>
 </div>
