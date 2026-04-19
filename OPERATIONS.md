@@ -8,6 +8,31 @@ ssh -i "C:\Users\woomin\.ssh\quant_server" ec2-user@ec2-3-36-109-13.ap-northeast
 
 ---
 
+## 웹 대시보드
+
+로컬 PC와 서버 양쪽에서 각각 한 단계씩 실행합니다.
+
+**1단계 — 로컬 PC: SSH 터널 연결**
+```powershell
+ssh -i "C:\Users\woomin\.ssh\Quant_Server_Key.pem" -L 8080:localhost:8080 ec2-user@ec2-3-36-109-13.ap-northeast-2.compute.amazonaws.com
+```
+
+**2단계 — 서버(SSH 세션 안): 대시보드 실행**
+```bash
+source ~/venv/bin/activate
+python -X utf8 ~/quant_trading/dashboard.py
+```
+
+**3단계 — 브라우저에서 접속**
+```
+http://localhost:8080
+```
+
+> SSH 연결을 끊으면 터널도 닫히므로 대시보드 접속이 끊깁니다.  
+> 백그라운드 실행이 필요하면 `nohup python -X utf8 ~/quant_trading/dashboard.py &` 사용.
+
+---
+
 ## 현황 확인
 
 ```bash

@@ -98,6 +98,41 @@ def get_performance_log(n=30):
     return list(reversed(rows))
 
 
+def get_kospi_cumulative(dates):
+    """dates 리스트에 맞춰 KOSPI 누적 수익률(%) 반환. 실패 시 빈 리스트."""
+    if not dates:
+        return []
+    try:
+        import yfinance as yf
+        from datetime import datetime, timedelta
+        start_dt = datetime.strptime(dates[0], "%Y-%m-%d") - timedelta(days=7)
+        end_dt   = datetime.strptime(dates[-1], "%Y-%m-%d") + timedelta(days=2)
+        df = yf.download("^KS11",
+                         start=start_dt.strftime("%Y-%m-%d"),
+                         end=end_dt.strftime("%Y-%m-%d"),
+                         progress=False)
+        if df.empty:
+            return []
+        # yfinance 버전에 따라 컬럼이 MultiIndex일 수 있음
+        close = df["Close"]
+        if hasattr(close, "squeeze"):
+            close = close.squeeze()
+        close = close.dropna()
+        # 기준가: dates[0] 이전 마지막 종가
+        base_cands = close[close.index <= dates[0]]
+        base = float((base_cands if not base_cands.empty else close).iloc[-1])
+        result = []
+        for d in dates:
+            cands = close[close.index <= d]
+            if cands.empty:
+                result.append(None)
+            else:
+                result.append(round((float(cands.iloc[-1]) / base - 1) * 100, 2))
+        return result
+    except Exception:
+        return []
+
+
 # ── HTML 생성 ─────────────────────────────────────────────────────────────────
 
 def fmt_krw(n):
@@ -168,14 +203,29 @@ def build_html():
           <td class="right mono">{t['amount']:,.0f}</td>
         </tr>"""
 
-    # 수익률 차트 데이터 (Chart.js)
+    # 일별 수익률 차트 데이터
     chart_labels = json.dumps([r.get("date","") for r in perf_log])
     chart_values = json.dumps([round(r.get("daily_return_pct", 0), 3) for r in perf_log])
+
+    # 누적 수익률 vs KOSPI 데이터
+    dates_list = [r.get("date","") for r in perf_log]
+    cum_pf = []
+    acc = 1.0
+    for r in perf_log:
+        acc *= (1 + r.get("daily_return_pct", 0) / 100)
+        cum_pf.append(round((acc - 1) * 100, 2))
+    kospi_cum = get_kospi_cumulative(dates_list)
+    # None → JSON null 처리는 json.dumps가 자동 처리
+    cum_pf_json    = json.dumps(cum_pf)
+    kospi_cum_json = json.dumps(kospi_cum if kospi_cum else [None] * len(cum_pf))
+    has_kospi = bool(kospi_cum)
 
     price_note = "실시간 (pykrx)" if PYKRX_OK else "저장가 (pykrx 미연결)"
 
     # Python 3.9: f-string 중첩 불가 → 조건부 섹션 미리 변수화
     perf_chart_html = "<canvas id='perfChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"
+    kospi_note = "" if has_kospi else " <span style='color:#94a3b8;font-size:11px'>(KOSPI 데이터 로드 실패)</span>"
+    cmp_chart_html = "<canvas id='cmpChart'></canvas>" if perf_log else "<div class='no-data'>성과 데이터 없음</div>"
 
     if holdings:
         holdings_html = (
@@ -207,6 +257,7 @@ def build_html():
 
     if perf_log:
         chart_script = (
+            # 일별 수익률 바 차트
             "const ctx = document.getElementById('perfChart').getContext('2d');\n"
             "new Chart(ctx, {\n"
             "  type: 'bar',\n"
@@ -227,6 +278,45 @@ def build_html():
             "    scales: {\n"
             "      x: { ticks: { color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#1e293b' } },\n"
             "      y: { ticks: { color:'#94a3b8', callback: v => v+'%' }, grid:{ color:'#334155' } }\n"
+            "    }\n"
+            "  }\n"
+            "});\n"
+            # 누적 수익률 vs KOSPI 라인 차트
+            "const ctx2 = document.getElementById('cmpChart').getContext('2d');\n"
+            "new Chart(ctx2, {\n"
+            "  type: 'line',\n"
+            "  data: {\n"
+            "    labels: " + chart_labels + ",\n"
+            "    datasets: [\n"
+            "      {\n"
+            "        label: '포트폴리오',\n"
+            "        data: " + cum_pf_json + ",\n"
+            "        borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)',\n"
+            "        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,\n"
+            "      },\n"
+            "      {\n"
+            "        label: 'KOSPI',\n"
+            "        data: " + kospi_cum_json + ",\n"
+            "        borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)',\n"
+            "        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3,\n"
+            "        borderDash: [4,3],\n"
+            "      }\n"
+            "    ]\n"
+            "  },\n"
+            "  options: {\n"
+            "    responsive: true,\n"
+            "    interaction: { mode: 'index', intersect: false },\n"
+            "    plugins: {\n"
+            "      legend: { labels: { color:'#e2e8f0', font:{ size:12 } } },\n"
+            "      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y != null ? ctx.parsed.y.toFixed(2)+'%' : 'N/A') } }\n"
+            "    },\n"
+            "    scales: {\n"
+            "      x: { ticks: { color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#1e293b' } },\n"
+            "      y: {\n"
+            "        ticks: { color:'#94a3b8', callback: v => v+'%' },\n"
+            "        grid: { color:'#334155' },\n"
+            "        afterDataLimits: axis => { const pad=1; axis.min-=pad; axis.max+=pad; }\n"
+            "      }\n"
             "    }\n"
             "  }\n"
             "});"
@@ -311,7 +401,8 @@ def build_html():
   .fb-seg {{ display:flex; align-items:center; justify-content:center;
              font-size:11px; font-weight:600; color:#fff; }}
 
-  canvas {{ max-height:180px; }}
+  canvas {{ max-height:220px; }}
+  #cmpChart {{ max-height:260px; }}
   .no-data {{ color:var(--muted); text-align:center; padding:24px; }}
 
   /* 새로고침 */
@@ -356,7 +447,15 @@ def build_html():
   </div>
 </div>
 
-<!-- 수익률 차트 + 전략 파라미터 -->
+<!-- 포트폴리오 vs KOSPI 누적 수익률 -->
+<div class="grid">
+  <div class="card">
+    <div class="card-title">포트폴리오 vs KOSPI 누적 수익률{kospi_note}</div>
+    {cmp_chart_html}
+  </div>
+</div>
+
+<!-- 일별 수익률 차트 + 전략 파라미터 -->
 <div class="grid grid-2">
 
   <div class="card">
