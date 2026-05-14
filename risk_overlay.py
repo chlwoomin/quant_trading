@@ -7,105 +7,167 @@ risk_overlay.py
 - strategy_config.json의 risk_overlay 파라미터 사용
 """
 
+import ast
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict
 
 from strategy_manager import get_config
 
 
-def get_kospi_ma200(date_str: str = None) -> Dict:
-    """
-    pykrx로 KOSPI 현재가와 200일 이동평균을 조회합니다.
-    pykrx 미설치 또는 장 휴장 시 마지막 저장값(data/kospi_cache.json)을 사용합니다.
-    """
-    import os, json
-    cache_path = os.path.join(os.path.dirname(__file__), "data", "kospi_cache.json")
+KOSPI_CACHE_PATH = os.path.join(os.path.dirname(__file__), "data", "kospi_cache.json")
 
-    def _save_cache(data):
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
 
-    def _load_cache():
-        if os.path.exists(cache_path):
-            with open(cache_path, encoding="utf-8") as f:
-                return json.load(f)
-        return None
+def _save_cache(data):
+    os.makedirs(os.path.dirname(KOSPI_CACHE_PATH), exist_ok=True)
+    with open(KOSPI_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
+
+def _load_cache():
+    if os.path.exists(KOSPI_CACHE_PATH):
+        with open(KOSPI_CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def _is_plausible_kospi(current: float, ma200: float) -> bool:
+    if current <= 1000 or current >= 10000 or ma200 <= 1000 or ma200 >= 10000:
+        return False
+    gap_pct = abs((current - ma200) / ma200 * 100)
+    return gap_pct <= 100
+
+
+def _build_result(dates, closes, source: str, today: str) -> Dict:
+    if len(closes) < 5:
+        raise ValueError(f"{source} KOSPI 데이터 부족")
+    kospi_cur = float(closes[-1])
+    ma200 = float(sum(closes[-200:]) / min(len(closes), 200))
+    if not _is_plausible_kospi(kospi_cur, ma200):
+        raise ValueError(f"{source} KOSPI 값 비정상: current={kospi_cur}, ma200={ma200}")
+    gap_pct = (kospi_cur - ma200) / ma200 * 100
+    return {
+        "date": today,
+        "last_trade_date": dates[-1],
+        "kospi_current": round(kospi_cur, 2),
+        "ma200": round(ma200, 2),
+        "above_ma200": kospi_cur > ma200,
+        "gap_pct": round(gap_pct, 2),
+        "source": source,
+        "dates": dates,
+        "closes": [round(float(v), 2) for v in closes],
+    }
+
+
+def get_kospi_history(date_str: str = None, lookback_days: int = 430) -> Dict:
+    """KOSPI 일별 종가 히스토리와 200일 이동평균 정보를 반환합니다."""
     today = date_str or datetime.today().strftime("%Y-%m-%d")
+    end_dt = datetime.strptime(today, "%Y-%m-%d")
+    start_dt = end_dt - timedelta(days=lookback_days)
 
-    # ── 1차: yfinance ^KS11 ───────────────────────────────────────────────────
+    # 1차: Naver Finance 지수 JSON. yfinance ^KS11이 비정상 값을 줄 때가 있어 우선 사용합니다.
+    try:
+        import requests
+        url = "https://api.finance.naver.com/siseJson.naver"
+        params = {
+            "symbol": "KOSPI",
+            "requestType": "1",
+            "startTime": start_dt.strftime("%Y%m%d"),
+            "endTime": end_dt.strftime("%Y%m%d"),
+            "timeframe": "day",
+        }
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        rows = ast.literal_eval(response.text.strip())
+        data_rows = [r for r in rows[1:] if isinstance(r, list) and len(r) >= 5]
+        dates = [
+            datetime.strptime(str(r[0]), "%Y%m%d").strftime("%Y-%m-%d")
+            for r in data_rows
+        ]
+        closes = [float(r[4]) for r in data_rows]
+        result = _build_result(dates, closes, "naver", today)
+        _save_cache(result)
+        return result
+    except Exception:
+        pass
+
+    # 2차: pykrx 지수 API. 일부 환경에서는 KRX 지수명 테이블 조회가 실패할 수 있습니다.
+    try:
+        from pykrx import stock as pykrx_stock
+        df = pykrx_stock.get_index_ohlcv_by_date(
+            start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d"), "1001"
+        )
+        if df.empty:
+            raise ValueError("pykrx KOSPI 데이터 없음")
+        dates = [idx.strftime("%Y-%m-%d") for idx in df.index]
+        closes = df["종가"].astype(float).tolist()
+        result = _build_result(dates, closes, "pykrx", today)
+        _save_cache(result)
+        return result
+    except Exception:
+        pass
+
+    # 3차: yfinance. sanity check를 통과한 경우에만 사용합니다.
     try:
         import yfinance as yf
-        end_dt  = datetime.strptime(today, "%Y-%m-%d")
-        start_dt = (end_dt - timedelta(days=320)).strftime("%Y-%m-%d")
-        raw = yf.download("^KS11", start=start_dt, end=today,
-                          progress=False, auto_adjust=True)
+        raw = yf.download(
+            "^KS11",
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=(end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),
+            progress=False,
+            auto_adjust=True,
+        )
         if isinstance(raw.columns, __import__("pandas").MultiIndex):
             closes_s = raw["Close"]["^KS11"].dropna()
         else:
             closes_s = raw["Close"].dropna()
-
-        if len(closes_s) < 5:
-            raise ValueError("yfinance KOSPI 데이터 부족")
-
-        closes    = closes_s.values
-        kospi_cur = float(closes[-1])
-        ma200     = float(closes[-200:].mean()) if len(closes) >= 200 else float(closes.mean())
-        gap_pct   = (kospi_cur - ma200) / ma200 * 100
-
-        result = {
-            "date":          today,
-            "kospi_current": round(kospi_cur, 2),
-            "ma200":         round(ma200, 2),
-            "above_ma200":   kospi_cur > ma200,
-            "gap_pct":       round(gap_pct, 2),
-            "source":        "yfinance",
-        }
+        dates = [idx.strftime("%Y-%m-%d") for idx in closes_s.index]
+        closes = closes_s.astype(float).tolist()
+        result = _build_result(dates, closes, "yfinance", today)
         _save_cache(result)
         return result
-
     except Exception:
         pass
 
-    # ── 2차: pykrx ───────────────────────────────────────────────────────────
-    try:
-        from pykrx import stock as pykrx_stock
-        end   = datetime.strptime(today, "%Y-%m-%d")
-        start = (end - timedelta(days=300)).strftime("%Y%m%d")
-        end_s = end.strftime("%Y%m%d")
-
-        df = pykrx_stock.get_market_ohlcv_by_date(start, end_s, "코스피")
-        if df.empty:
-            raise ValueError("pykrx KOSPI 데이터 없음")
-
-        closes    = df["종가"].values.astype(float)
-        kospi_cur = float(closes[-1])
-        ma200     = float(closes[-200:].mean()) if len(closes) >= 200 else float(closes.mean())
-        gap_pct   = (kospi_cur - ma200) / ma200 * 100
-
-        result = {
-            "date":          today,
-            "kospi_current": round(kospi_cur, 2),
-            "ma200":         round(ma200, 2),
-            "above_ma200":   kospi_cur > ma200,
-            "gap_pct":       round(gap_pct, 2),
-            "source":        "pykrx",
-        }
-        _save_cache(result)
-        return result
-
-    except Exception:
-        pass
-
-    # ── 3차: 캐시 → fallback ─────────────────────────────────────────────────
     cached = _load_cache()
     if cached:
-        cached["source"] = "cache"
-        return cached
+        try:
+            current = float(cached["kospi_current"])
+            ma200 = float(cached["ma200"])
+            if _is_plausible_kospi(current, ma200):
+                cached["source"] = "cache"
+                return cached
+        except Exception:
+            pass
     return {
-        "date": today, "kospi_current": 2500.0, "ma200": 2500.0,
-        "above_ma200": True, "gap_pct": 0.0, "source": "fallback",
+        "date": today,
+        "last_trade_date": today,
+        "kospi_current": 2500.0,
+        "ma200": 2500.0,
+        "above_ma200": True,
+        "gap_pct": 0.0,
+        "source": "fallback",
+        "dates": [],
+        "closes": [],
+    }
+
+
+def get_kospi_ma200(date_str: str = None) -> Dict:
+    """
+    KOSPI 현재가와 200일 이동평균을 조회합니다.
+    실패 시 마지막 저장값(data/kospi_cache.json)을 사용합니다.
+    """
+    data = get_kospi_history(date_str)
+    return {
+        "date": data["date"],
+        "last_trade_date": data.get("last_trade_date"),
+        "kospi_current": data["kospi_current"],
+        "ma200": data["ma200"],
+        "above_ma200": data["above_ma200"],
+        "gap_pct": data["gap_pct"],
+        "source": data.get("source", "unknown"),
     }
 
 

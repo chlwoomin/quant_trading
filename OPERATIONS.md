@@ -10,26 +10,29 @@ ssh -i "C:\Users\woomin\.ssh\quant_server" ec2-user@ec2-3-36-109-13.ap-northeast
 
 ## 웹 대시보드
 
-로컬 PC와 서버 양쪽에서 각각 한 단계씩 실행합니다.
+대시보드는 서버에서 `quant_dashboard` systemd 서비스로 항상 실행됩니다.  
+외부 공개 없이 서버의 `127.0.0.1:8080`에만 바인딩되어 있으므로 SSH 터널을 통해서만 볼 수 있습니다.
 
-**1단계 — 로컬 PC: SSH 터널 연결**
+**가장 쉬운 방법 — 로컬 PC에서 실행**
+```powershell
+.\dashboard_tunnel.bat
+```
+
+브라우저가 `http://localhost:8080`으로 열리고, 창을 닫으면 터널도 닫힙니다.
+
+**수동 연결**
 ```powershell
 ssh -i "C:\Users\woomin\.ssh\Quant_Server_Key.pem" -L 8080:localhost:8080 ec2-user@ec2-3-36-109-13.ap-northeast-2.compute.amazonaws.com
 ```
 
-**2단계 — 서버(SSH 세션 안): 대시보드 실행**
+**대시보드 서비스 관리**
 ```bash
-source ~/venv/bin/activate
-python -X utf8 ~/quant_trading/dashboard.py
+sudo systemctl status quant_dashboard
+sudo systemctl restart quant_dashboard
+sudo systemctl enable quant_dashboard
 ```
 
-**3단계 — 브라우저에서 접속**
-```
-http://localhost:8080
-```
-
-> SSH 연결을 끊으면 터널도 닫히므로 대시보드 접속이 끊깁니다.  
-> 백그라운드 실행이 필요하면 `nohup python -X utf8 ~/quant_trading/dashboard.py &` 사용.
+> SSH 터널을 끊으면 브라우저 접속도 끊깁니다. 대시보드 서버 자체는 EC2에서 계속 실행됩니다.
 
 ---
 

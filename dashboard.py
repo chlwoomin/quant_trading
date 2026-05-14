@@ -114,24 +114,15 @@ def get_kospi_prices(dates):
     if not dates:
         return []
     try:
-        import yfinance as yf
-        from datetime import datetime, timedelta
-        start_dt = datetime.strptime(dates[0], "%Y-%m-%d") - timedelta(days=7)
-        end_dt   = datetime.strptime(dates[-1], "%Y-%m-%d") + timedelta(days=2)
-        df = yf.download("^KS11",
-                         start=start_dt.strftime("%Y-%m-%d"),
-                         end=end_dt.strftime("%Y-%m-%d"),
-                         progress=False)
-        if df.empty:
-            return []
-        close = df["Close"]
-        if hasattr(close, "squeeze"):
-            close = close.squeeze()
-        close = close.dropna()
+        from risk_overlay import get_kospi_history
+        history = get_kospi_history(dates[-1])
+        close_by_date = dict(zip(history.get("dates", []), history.get("closes", [])))
         result = []
+        last_price = None
         for d in dates:
-            cands = close[close.index <= d]
-            result.append(round(float(cands.iloc[-1]), 2) if not cands.empty else None)
+            if d in close_by_date:
+                last_price = close_by_date[d]
+            result.append(round(float(last_price), 2) if last_price else None)
         return result
     except Exception:
         return []

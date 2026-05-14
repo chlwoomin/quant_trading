@@ -1,0 +1,18 @@
+[Unit]
+Description=Quant Dashboard SSH Tunnel Server
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/quant_trading
+ExecStart=/home/ec2-user/venv/bin/python -X utf8 /home/ec2-user/quant_trading/dashboard.py --port 8080
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/home/ec2-user/quant_trading/.env
+
+StandardOutput=append:/home/ec2-user/quant_trading/logs/dashboard.log
+StandardError=append:/home/ec2-user/quant_trading/logs/dashboard.log
+
+[Install]
+WantedBy=multi-user.target

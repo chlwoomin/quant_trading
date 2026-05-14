@@ -201,4 +201,18 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,python
 
-.env*
+.env
+.env.local
+
+# Runtime artifacts produced by the live trading server.
+logs/
+portfolio/*.db
+portfolio/*.db-*
+data/*.npy
+data/*.npz
+data/*cache*.json
+data/kospi200_universe.json
+data/universe_*.json
+data/wf_*.json
+data/dart/*.json
+strategy_history/

@@ -136,18 +136,26 @@ def screen_stocks(prices_window: np.ndarray, fund: dict, config: dict = None) ->
     f       = cfg["filters"]
     top_n   = cfg["portfolio"]["top_n"]
     n       = len(prices_window)
+    n_stocks = prices_window.shape[1]
 
     weeks_12m = min(52, n - 1)
     weeks_1m  = min(4,  n - 1)
-    ret_12m = (prices_window[-1] / prices_window[-1 - weeks_12m]) - 1 if weeks_12m > 0 else np.zeros(N_STOCKS)
-    ret_1m  = (prices_window[-1] / prices_window[-1 - weeks_1m])  - 1 if weeks_1m  > 0 else np.zeros(N_STOCKS)
+    ret_12m = (prices_window[-1] / prices_window[-1 - weeks_12m]) - 1 if weeks_12m > 0 else np.zeros(n_stocks)
+    ret_1m  = (prices_window[-1] / prices_window[-1 - weeks_1m])  - 1 if weeks_1m  > 0 else np.zeros(n_stocks)
     momentum = ret_12m - ret_1m
+    is_finance = fund.get("is_finance")
+    if is_finance is None:
+        base = np.array(IS_FINANCE, dtype=bool)
+        is_finance = np.zeros(n_stocks, dtype=bool)
+        is_finance[:min(len(base), n_stocks)] = base[:min(len(base), n_stocks)]
+    else:
+        is_finance = np.array(is_finance, dtype=bool)
 
     mask = (
         (fund["mktcap_억"]  >= f["min_market_cap_억"]) &
         (fund["debt_ratio"] <= f["max_debt_ratio"])    &
         (fund["roe"]        >= f["min_roe"])           &
-        (~np.array(IS_FINANCE))
+        (~is_finance)
     )
     indices = np.where(mask)[0]
     if len(indices) == 0:
@@ -239,11 +247,13 @@ class Backtest:
             self.backtest_weeks = len(data["kospi"]) - warmup
             self.total_weeks    = len(data["kospi"])
             self._warmup        = warmup
+            self.n_stocks       = data["stock_prices"].shape[1]
         else:
             self.backtest_weeks = backtest_weeks or 104
             self.total_weeks    = WARMUP_WEEKS + self.backtest_weeks
             self.data           = generate_data(self.total_weeks, seed)
             self._warmup        = WARMUP_WEEKS
+            self.n_stocks       = N_STOCKS
 
     def run(self) -> pd.DataFrame:
         prices  = self.data["stock_prices"]
@@ -265,7 +275,7 @@ class Backtest:
             fund       = funds[t]
 
             # 현재 포트폴리오 평가
-            stock_value = sum(holdings.get(i, 0) * cur_prices[i] for i in range(N_STOCKS))
+            stock_value = sum(holdings.get(i, 0) * cur_prices[i] for i in range(self.n_stocks))
             total_value = cash + stock_value
 
             # 리스크 신호
@@ -325,7 +335,7 @@ class Backtest:
                         buys += 1
 
             # 재평가
-            stock_value = sum(holdings.get(i, 0) * cur_prices[i] for i in range(N_STOCKS))
+            stock_value = sum(holdings.get(i, 0) * cur_prices[i] for i in range(self.n_stocks))
             total_value = cash + stock_value
             benchmark_value = benchmark_units * kospi[t]
 

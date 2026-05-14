@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from strategy_manager    import get_config, save_config, print_history
 from portfolio_manager   import init_db, rebalance, get_performance_summary
 from factor_engine       import run_screening
-from risk_overlay        import get_kospi_ma200, get_risk_signal, \
+from risk_overlay        import get_kospi_ma200, get_kospi_history, get_risk_signal, \
                                 check_individual_stop_loss
 from backtest            import Backtest, compute_metrics
 from ai_analyst          import analyze_and_suggest
@@ -76,11 +76,109 @@ def step_sim_backtest(config: dict) -> dict:
 
 
 # ── STEP 3: AI 전략 분석 ──────────────────────────────────────────────────────
-def step_ai_analysis(config: dict, metrics: dict, perf: dict) -> dict:
+def _nearest_price(history: dict, target_date: str):
+    dates = history.get("dates", [])
+    closes = history.get("closes", [])
+    last_price = None
+    for d, price in zip(dates, closes):
+        if d <= target_date:
+            last_price = price
+        else:
+            break
+    return last_price
+
+
+def build_strategy_review_context(perf: dict, metrics: dict, risk_signal: dict = None) -> dict:
+    """AI 분석과 리포트에 공통으로 넣을 전략 진단 컨텍스트를 만듭니다."""
+    holdings = perf.get("holdings", [])
+    total_value = perf.get("total_value", 0) or 0
+    cash = perf.get("cash", 0) or 0
+    stock_value = max(total_value - cash, 0)
+
+    enriched_holdings = []
+    for h in holdings:
+        avg = h.get("avg_price") or 0
+        cur = h.get("current_price") or avg
+        shares = h.get("shares") or 0
+        value = cur * shares
+        pnl_pct = ((cur / avg) - 1) * 100 if avg else 0
+        pnl_amt = (cur - avg) * shares
+        weight = value / total_value * 100 if total_value else 0
+        enriched_holdings.append({
+            "ticker": h.get("ticker"),
+            "name": h.get("name"),
+            "shares": shares,
+            "avg_price": round(avg),
+            "current_price": round(cur),
+            "value": round(value),
+            "weight_pct": round(weight, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_amt": round(pnl_amt),
+        })
+
+    enriched_holdings.sort(key=lambda x: x["pnl_amt"], reverse=True)
+    winners = enriched_holdings[:5]
+    losers = sorted(enriched_holdings, key=lambda x: x["pnl_amt"])[:5]
+
+    perf_logs = perf.get("performance_log", [])
+    live_alpha = {}
+    if perf_logs:
+        start_date = perf_logs[0].get("date")
+        try:
+            kospi_history = get_kospi_history()
+            start_kospi = _nearest_price(kospi_history, start_date)
+            end_kospi = kospi_history.get("kospi_current")
+            if start_kospi and end_kospi:
+                kospi_return = (end_kospi / start_kospi - 1) * 100
+                alpha = perf.get("pnl_pct", 0) - kospi_return
+                live_alpha = {
+                    "start_date": start_date,
+                    "end_date": kospi_history.get("last_trade_date"),
+                    "portfolio_return_pct": perf.get("pnl_pct", 0),
+                    "kospi_return_pct": round(kospi_return, 2),
+                    "relative_alpha_pct": round(alpha, 2),
+                    "source": kospi_history.get("source"),
+                }
+        except Exception as e:
+            live_alpha = {"error": str(e)}
+
+    concentration_top5 = sum(h["weight_pct"] for h in enriched_holdings[:5])
+    cash_ratio = cash / total_value * 100 if total_value else 0
+    stock_ratio = stock_value / total_value * 100 if total_value else 0
+
+    diagnosis_flags = []
+    if live_alpha.get("relative_alpha_pct", 0) < -5:
+        diagnosis_flags.append("KOSPI 대비 상대수익률 -5%p 이하")
+    if metrics.get("alpha_pct", 0) < 0:
+        diagnosis_flags.append("백테스트 Alpha 음수")
+    if metrics.get("sharpe", 0) < 0.2:
+        diagnosis_flags.append("Sharpe 검증 기준 미달")
+    if cash_ratio > 15:
+        diagnosis_flags.append("현금 비중 높음")
+    if concentration_top5 > 60:
+        diagnosis_flags.append("상위 5개 종목 집중도 높음")
+
+    return {
+        "live_alpha": live_alpha,
+        "allocation": {
+            "cash_ratio_pct": round(cash_ratio, 2),
+            "stock_ratio_pct": round(stock_ratio, 2),
+            "top5_weight_pct": round(concentration_top5, 2),
+        },
+        "holdings": enriched_holdings,
+        "top_contributors": winners,
+        "bottom_contributors": losers,
+        "diagnosis_flags": diagnosis_flags,
+        "risk_signal": risk_signal or {},
+    }
+
+
+def step_ai_analysis(config: dict, metrics: dict, perf: dict, review_context: dict = None) -> dict:
     log("STEP 3 — AI 전략 분석")
 
     # 최근 레짐 분포 (portfolio performance_log에서 추출 불가 → 간략히 없음)
-    result = analyze_and_suggest(config, metrics, perf, regime_history=None)
+    result = analyze_and_suggest(config, metrics, perf, regime_history=None,
+                                 review_context=review_context)
 
     # AI 오류 시 디스코드 알림
     if result.get("ai_error"):
@@ -172,7 +270,8 @@ def step_rebalance(config: dict, risk_signal: dict) -> dict:
 def step_report(config: dict, perf: dict, screening: dict,
                 risk_signal: dict, trade_result: dict,
                 sim_metrics: dict, ai_result: dict,
-                strategy_update_info: dict) -> dict:
+                strategy_update_info: dict,
+                review_context: dict = None) -> dict:
     log("STEP 7 — 주간 리포트 생성 및 발송")
 
     trades = trade_result.get("trades", {}) if trade_result else {}
@@ -189,9 +288,16 @@ def step_report(config: dict, perf: dict, screening: dict,
             "should_update":     ai_result.get("should_update"),
             "reasoning":         ai_result.get("reasoning"),
             "market_assessment": ai_result.get("market_assessment"),
+            "benchmark_assessment": ai_result.get("benchmark_assessment"),
+            "risk_assessment": ai_result.get("risk_assessment"),
+            "performance_diagnosis": ai_result.get("performance_diagnosis", []),
+            "action_items": ai_result.get("action_items", []),
+            "watchlist": ai_result.get("watchlist", []),
+            "confidence": ai_result.get("confidence"),
         },
         "strategy_update": strategy_update_info,
         "trades":          trades,
+        "strategy_review": review_context or {},
     }
 
     # ── 콘솔 출력 ────────────────────────────────────────────────────────────
@@ -234,8 +340,10 @@ def run_weekly(use_ai: bool = True, use_real: bool = True, force: bool = False):
     sim_metrics = step_sim_backtest(config)
 
     # 3. AI 분석
+    pre_risk_signal = get_risk_signal(get_kospi_ma200())
+    review_context = build_strategy_review_context(perf, sim_metrics, pre_risk_signal)
     if use_ai:
-        ai_result = step_ai_analysis(config, sim_metrics, perf)
+        ai_result = step_ai_analysis(config, sim_metrics, perf, review_context)
     else:
         log("STEP 3 — AI 분석 스킵 (--no-ai)")
         ai_result = {"should_update": False, "reasoning": "스킵",
@@ -274,9 +382,11 @@ def run_weekly(use_ai: bool = True, use_real: bool = True, force: bool = False):
 
     # 7. 리포트 + 알림 발송
     perf_updated = get_performance_summary()
+    review_context = build_strategy_review_context(perf_updated, sim_metrics, risk_signal)
 
     step_report(config, perf_updated, screening, risk_signal,
-                trade_result, sim_metrics, ai_result, strategy_update_info)
+                trade_result, sim_metrics, ai_result, strategy_update_info,
+                review_context)
 
     print(f"\n{bar}")
     log("파이프라인 완료")

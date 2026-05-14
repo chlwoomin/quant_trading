@@ -19,33 +19,13 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from strategy_manager import get_config
+from universe import DEFAULT_TICKERS, DEFAULT_NAMES, DEFAULT_SECTORS, get_screening_universe
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-TICKERS = [
-    "005930", "000660", "035420", "005380", "051910",
-    "006400", "035720", "028260", "207940", "066570",
-    "105560", "055550", "032830", "086790", "003550",
-    "018260", "011200", "034020", "096770", "010130",
-    "009150", "000270", "012330", "033780", "021240",
-    "003490", "047050", "009830", "006800", "010950",
-]
-NAMES = [
-    "삼성전자", "SK하이닉스", "NAVER", "현대차", "LG화학",
-    "삼성SDI", "카카오", "삼성물산", "삼성바이오로직스", "LG전자",
-    "KB금융", "신한지주", "삼성생명", "하나금융", "LG",
-    "삼성에스디에스", "HMM", "한국전력", "SK이노베이션", "포스코홀딩스",
-    "삼성전기", "기아", "현대모비스", "KT&G", "코웨이",
-    "대한항공", "NH투자증권", "한화솔루션", "미래에셋증권", "영원무역",
-]
-SECTORS = [
-    "반도체", "반도체", "인터넷", "자동차", "화학",
-    "2차전지", "인터넷", "지주", "바이오", "전자",
-    "금융", "금융", "금융", "금융", "지주",
-    "IT서비스", "해운", "유틸리티", "에너지", "철강",
-    "전자부품", "자동차", "자동차부품", "담배", "생활용품",
-    "항공", "금융", "태양광", "금융", "섬유",
-]
+TICKERS = DEFAULT_TICKERS
+NAMES = DEFAULT_NAMES
+SECTORS = DEFAULT_SECTORS
 
 
 # ── 실제 유니버스 수집 ────────────────────────────────────────────────────────
@@ -62,7 +42,9 @@ def get_real_universe(date_str: str = None) -> pd.DataFrame:
       모멘텀(12M-1M)       — 52주 주가 기반
     """
     today = date_str or datetime.today().strftime("%Y-%m-%d")
-    cache_path = os.path.join(CACHE_DIR, f"universe_{today}.json")
+    base_universe = get_screening_universe()
+    universe_name = "kospi200" if len(base_universe) >= 150 else "default30"
+    cache_path = os.path.join(CACHE_DIR, f"universe_{universe_name}_{today}.json")
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     # 당일 캐시 로드
@@ -78,10 +60,14 @@ def get_real_universe(date_str: str = None) -> pd.DataFrame:
         print("  ⚠ yfinance 미설치 — 기본값 사용")
         return _fallback_universe()
 
-    print(f"  yfinance 데이터 수집 중 ({len(TICKERS)}종목)...")
+    tickers = [row["ticker"] for row in base_universe]
+    names = [row["name"] for row in base_universe]
+    sectors = [row.get("sector", "기타") for row in base_universe]
+
+    print(f"  yfinance 데이터 수집 중 ({len(tickers)}종목, {universe_name})...")
 
     # ── 주가 일괄 다운로드 (모멘텀 계산용) ──────────────────────────────────
-    yf_tickers = [t + ".KS" for t in TICKERS]
+    yf_tickers = [t + ".KS" for t in tickers]
     end_dt  = datetime.today()
     start_dt = end_dt - timedelta(days=380)   # 52주 + 여유
 
@@ -115,7 +101,7 @@ def get_real_universe(date_str: str = None) -> pd.DataFrame:
 
     # ── 종목별 펀더멘탈 수집 ─────────────────────────────────────────────────
     rows = []
-    for ticker, name, sector, yf_ticker in zip(TICKERS, NAMES, SECTORS, yf_tickers):
+    for idx, (ticker, name, sector, yf_ticker) in enumerate(zip(tickers, names, sectors, yf_tickers), 1):
         r12m, r1m, mom = _momentum(yf_ticker)
 
         try:
@@ -171,9 +157,8 @@ def get_real_universe(date_str: str = None) -> pd.DataFrame:
             "ret_1m":       r1m,
             "momentum":     mom,
         })
-        print(f"    {name:<14} PBR={rows[-1]['pbr']:.2f}  "
-              f"PER={rows[-1]['per']:.1f}  ROE={rows[-1]['roe']:.1%}  "
-              f"MOM={mom:+.1%}")
+        print(f"    [{idx:3d}/{len(tickers)}] {name:<18} PBR={rows[-1]['pbr']:.2f}  "
+              f"PER={rows[-1]['per']:.1f}  ROE={rows[-1]['roe']:.1%}  MOM={mom:+.1%}")
 
     # 캐시 저장
     with open(cache_path, "w", encoding="utf-8") as f:
@@ -202,7 +187,8 @@ def apply_filters(df: pd.DataFrame, config: dict = None) -> pd.DataFrame:
     df = df[df["debt_ratio"]    <= f["max_debt_ratio"]]
     df = df[df["roe"]           >= f["min_roe"]]
     if f.get("exclude_finance"):
-        df = df[~df["sector"].isin(["금융", "보험", "증권"])]
+        finance_terms = ["금융", "보험", "증권", "Financials"]
+        df = df[~df["sector"].astype(str).isin(finance_terms)]
     print(f"  필터링: {original}종목 → {len(df)}종목")
     return df.copy()
 

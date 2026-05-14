@@ -21,6 +21,7 @@ def build_text_report(data: dict) -> str:
     ai          = data.get("ai_analysis", {})
     upd         = data.get("strategy_update", {})
     trades      = data.get("trades", {})
+    review      = data.get("strategy_review", {})
     ver         = data.get("strategy_version", "?")
     cfg         = data.get("current_config", {})
 
@@ -53,6 +54,34 @@ def build_text_report(data: dict) -> str:
             f"• MDD: {metrics.get('max_dd_pct', 0):.1f}%  |  주간 승률: {metrics.get('win_rate_pct', 0):.1f}%",
         ]
 
+    live_alpha = review.get("live_alpha", {})
+    allocation = review.get("allocation", {})
+    if live_alpha:
+        lines += [
+            "",
+            "📊 *실전 KOSPI 대비 성과*",
+            f"• 기간: {live_alpha.get('start_date', 'N/A')} ~ {live_alpha.get('end_date', 'N/A')}",
+            f"• 포트폴리오: {live_alpha.get('portfolio_return_pct', 0):+.2f}%  |  KOSPI: {live_alpha.get('kospi_return_pct', 0):+.2f}%",
+            f"• 상대수익률: {live_alpha.get('relative_alpha_pct', 0):+.2f}%p  (source: {live_alpha.get('source', 'N/A')})",
+        ]
+    if allocation:
+        lines += [
+            f"• 비중: 주식 {allocation.get('stock_ratio_pct', 0):.1f}% / 현금 {allocation.get('cash_ratio_pct', 0):.1f}% / 상위5종목 {allocation.get('top5_weight_pct', 0):.1f}%",
+        ]
+
+    top = review.get("top_contributors", [])
+    bottom = review.get("bottom_contributors", [])
+    if top or bottom:
+        lines += ["", "🏆 *보유 종목 기여도*"]
+        if top:
+            lines.append("• 기여 상위:")
+            for h in top[:5]:
+                lines.append(f"  - {h.get('name')} {h.get('pnl_pct',0):+.2f}% / {h.get('pnl_amt',0):+,.0f}원 / 비중 {h.get('weight_pct',0):.1f}%")
+        if bottom:
+            lines.append("• 기여 하위:")
+            for h in bottom[:5]:
+                lines.append(f"  - {h.get('name')} {h.get('pnl_pct',0):+.2f}% / {h.get('pnl_amt',0):+,.0f}원 / 비중 {h.get('weight_pct',0):.1f}%")
+
     # 이번 주 매매
     sells = trades.get("sell", [])
     buys  = trades.get("buy",  [])
@@ -78,9 +107,31 @@ def build_text_report(data: dict) -> str:
         f"{regime_emoji} 시장 레짐: *{risk.get('signal', 'N/A')}*  (KOSPI 200MA {risk.get('gap_pct', 0):+.2f}%)",
     ]
     if ai.get("market_assessment"):
-        lines.append(f"💡 {ai['market_assessment']}")
+        lines.append(f"💡 시장: {ai['market_assessment']}")
+    if ai.get("benchmark_assessment"):
+        lines.append(f"📌 KOSPI 대비: {ai['benchmark_assessment']}")
+    if ai.get("risk_assessment"):
+        lines.append(f"🛡 리스크: {ai['risk_assessment']}")
     if ai.get("reasoning"):
-        lines.append(f"\n📝 분석: {ai['reasoning']}")
+        lines.append(f"\n📝 최종 판단: {ai['reasoning']}")
+
+    diagnosis = ai.get("performance_diagnosis") or []
+    actions = ai.get("action_items") or []
+    watchlist = ai.get("watchlist") or []
+    if diagnosis:
+        lines += ["", "🔎 *성과 원인 진단*"]
+        for item in diagnosis[:6]:
+            lines.append(f"• {item}")
+    if actions:
+        lines += ["", "✅ *다음 액션*"]
+        for item in actions[:6]:
+            lines.append(f"• {item}")
+    if watchlist:
+        lines += ["", "👀 *Watchlist*"]
+        for item in watchlist[:6]:
+            lines.append(f"• {item}")
+    if ai.get("confidence"):
+        lines.append(f"\n신뢰도: `{ai.get('confidence')}`")
 
     # 현재 전략 파라미터
     lines += [
@@ -143,6 +194,7 @@ def build_html_report(data: dict) -> str:
     ai      = data.get("ai_analysis", {})
     upd     = data.get("strategy_update", {})
     trades  = data.get("trades", {})
+    review  = data.get("strategy_review", {})
     ver     = data.get("strategy_version", "?")
 
     regime_color = {
@@ -156,6 +208,10 @@ def build_html_report(data: dict) -> str:
     sells = data.get("trades", {}).get("sell", [])
     buys  = data.get("trades", {}).get("buy",  [])
     hold  = data.get("trades", {}).get("hold", [])
+    live_alpha = review.get("live_alpha", {})
+    allocation = review.get("allocation", {})
+    top = review.get("top_contributors", [])
+    bottom = review.get("bottom_contributors", [])
 
     holdings_rows = ""
     for h in perf.get("holdings", [])[:15]:
@@ -166,6 +222,20 @@ def build_html_report(data: dict) -> str:
           <td style="text-align:right">{h.get('shares',0):,}주</td>
           <td style="text-align:right">{h.get('avg_price',0):,.0f}원</td>
         </tr>"""
+
+    top_rows = ""
+    for h in top[:5]:
+        color = "#22c55e" if h.get("pnl_amt", 0) >= 0 else "#ef4444"
+        top_rows += f"<tr><td>{h.get('name','')}</td><td>{h.get('weight_pct',0):.1f}%</td><td style='color:{color};text-align:right'>{h.get('pnl_pct',0):+.2f}%</td><td style='text-align:right'>{h.get('pnl_amt',0):+,.0f}원</td></tr>"
+
+    bottom_rows = ""
+    for h in bottom[:5]:
+        color = "#22c55e" if h.get("pnl_amt", 0) >= 0 else "#ef4444"
+        bottom_rows += f"<tr><td>{h.get('name','')}</td><td>{h.get('weight_pct',0):.1f}%</td><td style='color:{color};text-align:right'>{h.get('pnl_pct',0):+.2f}%</td><td style='text-align:right'>{h.get('pnl_amt',0):+,.0f}원</td></tr>"
+
+    diagnosis_html = "".join(f"<li>{x}</li>" for x in (ai.get("performance_diagnosis") or [])[:6])
+    actions_html = "".join(f"<li>{x}</li>" for x in (ai.get("action_items") or [])[:6])
+    watchlist_html = "".join(f"<li>{x}</li>" for x in (ai.get("watchlist") or [])[:6])
 
     change_section = ""
     if upd.get("updated"):
@@ -216,6 +286,15 @@ def build_html_report(data: dict) -> str:
     <div class="metric"><div class="val">{metrics.get('alpha_pct',0):+.1f}%</div><div class="lbl">Alpha</div></div>
   </div>
 
+  <h3 style="margin-top:20px">실전 KOSPI 대비 성과</h3>
+  <table>
+    <tr><th>기간</th><td>{live_alpha.get('start_date','N/A')} ~ {live_alpha.get('end_date','N/A')}</td></tr>
+    <tr><th>포트폴리오</th><td>{live_alpha.get('portfolio_return_pct',0):+.2f}%</td></tr>
+    <tr><th>KOSPI</th><td>{live_alpha.get('kospi_return_pct',0):+.2f}%</td></tr>
+    <tr><th>상대수익률</th><td>{live_alpha.get('relative_alpha_pct',0):+.2f}%p</td></tr>
+    <tr><th>비중</th><td>주식 {allocation.get('stock_ratio_pct',0):.1f}% / 현금 {allocation.get('cash_ratio_pct',0):.1f}% / 상위5종목 {allocation.get('top5_weight_pct',0):.1f}%</td></tr>
+  </table>
+
   <h3 style="margin-top:20px">이번 주 매매</h3>
   <p>매도 <b>{len(sells)}</b>종목 &nbsp;|&nbsp; 매수 <b>{len(buys)}</b>종목 &nbsp;|&nbsp; 유지 <b>{len(hold)}</b>종목</p>
   {"<p>매도: " + ", ".join(t.get("name","?") for t in sells[:8]) + "</p>" if sells else ""}
@@ -225,14 +304,24 @@ def build_html_report(data: dict) -> str:
   <table><tr><th>종목명</th><th>티커</th><th>수량</th><th>평균단가</th></tr>
   {holdings_rows}
   </table>
+
+  <h3 style="margin-top:20px">기여도 상위/하위</h3>
+  <table><tr><th>상위 종목</th><th>비중</th><th>수익률</th><th>손익</th></tr>{top_rows}</table>
+  <table style="margin-top:10px"><tr><th>하위 종목</th><th>비중</th><th>수익률</th><th>손익</th></tr>{bottom_rows}</table>
 </div>
 
 <div class="card">
   <h2>2. AI 시장 분석</h2>
   <p>시장 레짐: <span class="regime">{risk.get('signal','N/A')}</span>
      &nbsp; KOSPI 200MA 대비 <b>{risk.get('gap_pct',0):+.2f}%</b></p>
-  {"<p>💡 " + ai.get("market_assessment","") + "</p>" if ai.get("market_assessment") else ""}
-  {"<p>" + ai.get("reasoning","") + "</p>" if ai.get("reasoning") else ""}
+  {"<p><b>시장:</b> " + ai.get("market_assessment","") + "</p>" if ai.get("market_assessment") else ""}
+  {"<p><b>KOSPI 대비:</b> " + ai.get("benchmark_assessment","") + "</p>" if ai.get("benchmark_assessment") else ""}
+  {"<p><b>리스크:</b> " + ai.get("risk_assessment","") + "</p>" if ai.get("risk_assessment") else ""}
+  {"<p><b>최종 판단:</b> " + ai.get("reasoning","") + "</p>" if ai.get("reasoning") else ""}
+  {"<h3>성과 원인 진단</h3><ul>" + diagnosis_html + "</ul>" if diagnosis_html else ""}
+  {"<h3>다음 액션</h3><ul>" + actions_html + "</ul>" if actions_html else ""}
+  {"<h3>Watchlist</h3><ul>" + watchlist_html + "</ul>" if watchlist_html else ""}
+  {"<p style='color:#64748b'>AI 판단 신뢰도: " + ai.get("confidence","") + "</p>" if ai.get("confidence") else ""}
 </div>
 
 <div class="card">

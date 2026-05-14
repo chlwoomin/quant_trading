@@ -28,35 +28,28 @@ try:
 except ImportError:
     raise SystemExit("yfinance가 설치되지 않았습니다: pip install yfinance")
 
+from universe import DEFAULT_TICKERS, DEFAULT_NAMES, DEFAULT_SECTORS, get_screening_universe
+
 # ── 종목 정의 ─────────────────────────────────────────────────────────────────
-TICKERS = [
-    "005930", "000660", "035420", "005380", "051910",
-    "006400", "035720", "028260", "207940", "066570",
-    "105560", "055550", "032830", "086790", "003550",
-    "018260", "011200", "034020", "096770", "010130",
-    "009150", "000270", "012330", "033780", "021240",
-    "003490", "047050", "009830", "006800", "010950",
-]
-NAMES = [
-    "삼성전자", "SK하이닉스", "NAVER", "현대차", "LG화학",
-    "삼성SDI", "카카오", "삼성물산", "삼성바이오로직스", "LG전자",
-    "KB금융", "신한지주", "삼성생명", "하나금융", "LG",
-    "삼성에스디에스", "HMM", "한국전력", "SK이노베이션", "포스코홀딩스",
-    "삼성전기", "기아", "현대모비스", "KT&G", "코웨이",
-    "대한항공", "NH투자증권", "한화솔루션", "미래에셋증권", "영원무역",
-]
-SECTORS = [
-    "반도체", "반도체", "인터넷", "자동차", "화학",
-    "2차전지", "인터넷", "지주", "바이오", "전자",
-    "금융", "금융", "금융", "금융", "지주",
-    "IT서비스", "해운", "유틸리티", "에너지", "철강",
-    "전자부품", "자동차", "자동차부품", "담배", "생활용품",
-    "항공", "금융", "태양광", "금융", "섬유",
-]
+TICKERS = DEFAULT_TICKERS
+NAMES = DEFAULT_NAMES
+SECTORS = DEFAULT_SECTORS
 
 YF_TICKERS = [t + ".KS" for t in TICKERS]
 YF_KOSPI   = "^KS11"
 CACHE_DIR  = os.path.join(os.path.dirname(__file__), "data")
+
+
+def _universe_rows():
+    return get_screening_universe()
+
+
+def _universe_parts():
+    rows = _universe_rows()
+    tickers = [r["ticker"] for r in rows]
+    names = [r["name"] for r in rows]
+    sectors = [r.get("sector", "기타") for r in rows]
+    return rows, tickers, names, sectors, [t + ".KS" for t in tickers]
 
 
 # ── 가격 데이터 수집 ──────────────────────────────────────────────────────────
@@ -66,7 +59,8 @@ def fetch_prices(start: str, end: str) -> tuple[pd.DataFrame, pd.Series]:
     Returns: (stock_weekly, kospi_weekly)
     """
     print("  주가 다운로드 중...")
-    all_tickers = YF_TICKERS + [YF_KOSPI]
+    _, _, _, _, yf_tickers = _universe_parts()
+    all_tickers = yf_tickers + [YF_KOSPI]
     raw = yf.download(all_tickers, start=start, end=end, progress=False, auto_adjust=True)
 
     # MultiIndex: (field, ticker) → Close만 추출
@@ -79,7 +73,7 @@ def fetch_prices(start: str, end: str) -> tuple[pd.DataFrame, pd.Series]:
     weekly = close.resample("W-FRI").last().ffill()
 
     kospi_weekly  = weekly[YF_KOSPI].dropna()
-    stocks_weekly = weekly[YF_TICKERS].copy()
+    stocks_weekly = weekly[[c for c in yf_tickers if c in weekly.columns]].copy()
 
     # 데이터 없는 종목 처리: ffill → 남은 NaN은 시장 평균으로 채움
     stocks_weekly = stocks_weekly.ffill().bfill()
@@ -102,10 +96,11 @@ def fetch_fundamentals() -> dict:
 
     Returns: dict[ticker_idx → dict of fundamental values]
     """
-    print("  펀더멘털 수집 중 (30종목)...")
+    _, tickers, names, _, yf_tickers = _universe_parts()
+    print(f"  펀더멘털 수집 중 ({len(tickers)}종목)...")
     result = {}
 
-    for i, (ticker, yf_ticker) in enumerate(zip(TICKERS, YF_TICKERS)):
+    for i, (ticker, name, yf_ticker) in enumerate(zip(tickers, names, yf_tickers)):
         try:
             t = yf.Ticker(yf_ticker)
             info = t.info
@@ -157,11 +152,11 @@ def fetch_fundamentals() -> dict:
                 "debt_ratio": float(np.clip(de_ratio,  0.05, 5.0)),
                 "mktcap_억":  float(max(mktcap_억, 100)),
             }
-            print(f"    [{i+1:2d}/30] {NAMES[i]}: ROE={result[i]['roe']:.2%}  "
+            print(f"    [{i+1:3d}/{len(tickers)}] {name}: ROE={result[i]['roe']:.2%}  "
                   f"PBR={result[i]['pbr']:.2f}  PER={result[i]['per']:.1f}")
 
         except Exception as e:
-            print(f"    [{i+1:2d}/30] {NAMES[i]}: 오류 → 기본값 사용 ({e})")
+            print(f"    [{i+1:3d}/{len(tickers)}] {name}: 오류 → 기본값 사용 ({e})")
             result[i] = {
                 "roe": 0.08, "gpa": 0.15, "pbr": 1.5, "per": 15.0,
                 "debt_ratio": 0.5, "mktcap_억": 5000,
@@ -182,7 +177,8 @@ def build_backtest_data(stocks_weekly: pd.DataFrame,
       - 펀더멘털은 yfinance 현재 값 기반 (고정)
       - 실제 가치는 매 분기 변하지만, 과거 API 없이는 현재값이 최선
     """
-    n_stocks = len(TICKERS)
+    rows, tickers, names, sectors, yf_tickers = _universe_parts()
+    n_stocks = len(tickers)
     n_weeks  = len(stocks_weekly)
 
     # KOSPI 정렬 (stocks_weekly 인덱스 기준)
@@ -190,7 +186,7 @@ def build_backtest_data(stocks_weekly: pd.DataFrame,
 
     # 주가 행렬: (n_weeks, n_stocks)
     price_matrix = np.zeros((n_weeks, n_stocks))
-    for i, yf_ticker in enumerate(YF_TICKERS):
+    for i, yf_ticker in enumerate(yf_tickers):
         if yf_ticker in stocks_weekly.columns:
             price_matrix[:, i] = stocks_weekly[yf_ticker].values
         else:
@@ -204,6 +200,7 @@ def build_backtest_data(stocks_weekly: pd.DataFrame,
         "per":        np.array([fundamentals.get(i, {}).get("per",       15.0) for i in range(n_stocks)]),
         "debt_ratio": np.array([fundamentals.get(i, {}).get("debt_ratio",0.5)  for i in range(n_stocks)]),
         "mktcap_억":  np.array([fundamentals.get(i, {}).get("mktcap_억", 5000) for i in range(n_stocks)]),
+        "is_finance": np.array([s in ("금융", "보험", "증권", "Financials") for s in sectors]),
     }
     fund_history = [fund_arrays] * n_weeks   # 동일 참조 (고정값이므로 OK)
 
@@ -214,6 +211,10 @@ def build_backtest_data(stocks_weekly: pd.DataFrame,
         "dates":        stocks_weekly.index.tolist(),
         "warmup_weeks": warmup_weeks,
         "is_real_data": True,
+        "tickers": tickers,
+        "names": names,
+        "sectors": sectors,
+        "universe_name": "kospi200" if n_stocks >= 150 else "default30",
     }
 
 
@@ -234,6 +235,10 @@ def save_cache(data: dict, cache_dir: str):
         "warmup_weeks": data["warmup_weeks"],
         "fetched_at":   datetime.now().isoformat(),
         "is_real_data": True,
+        "tickers":      data.get("tickers", []),
+        "names":        data.get("names", []),
+        "sectors":      data.get("sectors", []),
+        "universe_name": data.get("universe_name"),
     }
     with open(os.path.join(cache_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -248,6 +253,9 @@ def load_cache(cache_dir: str):
     try:
         with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
+        if meta.get("universe_name") != "kospi200":
+            print("  기존 캐시가 KOSPI200 기준이 아니어서 재수집합니다.")
+            return None
         kospi        = np.load(os.path.join(cache_dir, "kospi.npy"))
         stock_prices = np.load(os.path.join(cache_dir, "stock_prices.npy"))
         with open(os.path.join(cache_dir, "fundamentals.json"), encoding="utf-8") as f:
@@ -266,6 +274,10 @@ def load_cache(cache_dir: str):
             "dates":        meta["dates"],
             "warmup_weeks": meta["warmup_weeks"],
             "is_real_data": True,
+            "tickers":      meta.get("tickers", []),
+            "names":        meta.get("names", []),
+            "sectors":      meta.get("sectors", []),
+            "universe_name": meta.get("universe_name"),
         }
     except Exception as e:
         print(f"  캐시 로드 실패: {e}")
